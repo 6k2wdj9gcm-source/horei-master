@@ -293,7 +293,7 @@
           <button class="btn primary block" id="backupBtn" type="button">完全バックアップを作成してダウンロード</button>
 
           <h3>復元</h3>
-          <p class="small">バックアップのZIPを選ぶと、まず内容のプレビュー（書き出し日時・データ構造の版・件数）を表示します。復元は、あなたが確認ボタンを押した場合のみ実行されます。IDはバックアップ時のものをそのまま保持します。</p>
+          <p class="small">バックアップのZIPを選ぶと、まず内容のプレビュー（書き出し日時・データ構造の版・件数）を表示します。その際、ZIP内の全ファイルのCRC32と画像のSHA-256を検証し、必要なデータと画像がすべて読み込めることを確認します。破損・不一致があれば復元は中止され、既存データは変更されません。復元は、あなたが確認ボタンを押した場合のみ実行され、書き込みは単一トランザクションで原子的に行われるため、途中で失敗しても既存データは保持されます。IDはバックアップ時のものをそのまま保持します。</p>
           <label class="flabel" for="restoreFile">バックアップファイル（ZIP）</label>
           <input type="file" id="restoreFile" accept=".zip,application/zip">
           <div id="restorePreview" style="margin-top:12px"></div>
@@ -305,8 +305,12 @@
 
         <div class="card">
           <h2>データ構造と移行ログ</h2>
-          <p class="small">データ構造の版（SCHEMA_VERSION）は <span class="mono" id="schemaVersionText">1</span> です。起動のたびに移行チェックを行い、結果をここに記録します。将来の版で構造が変わる場合は、既存データを消さずに移行する枠組みを通します。</p>
+          <p class="small">データ構造の版（SCHEMA_VERSION）は <span class="mono" id="schemaVersionText">1</span> です。起動のたびに移行チェックを行い、結果をここに記録します。旧版のデータは、まずメモリ上で移行と検証を行い、成功した場合のみ単一トランザクションで書き込みます。失敗した場合は既存データをそのまま保持し、原因をこのログに記録します。旧版バックアップの復元でも同じ方式を使います。</p>
           <div class="logbox" id="migrationLog"><div class="entry">読み込み中…</div></div>
+          <h3>安全性テスト</h3>
+          <p class="small">復元と移行の安全性を、テストデータで検証します。内容は「正常なZIPの復元（CRC32・SHA-256検証つき）」「破損ZIPの拒否」「画像チェックサム不一致の拒否」「復元途中のエラーでも既存データが保持されること」「旧版（v0）から現行版への移行の成功と失敗時の保持」です。テストはメモリ上とテスト専用データベースで実行し、あなたの保存データは変更しません。結果は上の移行ログにも記録されます。</p>
+          <button class="btn ghost block" id="runSafetyTestsBtn" type="button">安全性テストを実行</button>
+          <div id="safetyTestResults" style="margin-top:12px"></div>
         </div>
 
         <div class="card">
@@ -523,7 +527,9 @@
         }
         entries.push({
           method: dv.getUint16(p + 10, true),
+          crc: dv.getUint32(p + 16, true),
           compSize: dv.getUint32(p + 20, true),
+          uSize: dv.getUint32(p + 24, true),
           nl: dv.getUint16(p + 28, true), el: dv.getUint16(p + 30, true), cl: dv.getUint16(p + 32, true),
           lo: dv.getUint32(p + 42, true)
         });
@@ -532,11 +538,21 @@
       }
       entries.forEach(function(e){
         chain = chain.then(function(){
+          if (e.lo + 30 > buf.byteLength || dv.getUint32(e.lo, true) !== 0x04034b50){
+            throw new Error('ZIP内のファイルヘッダーが壊れています: ' + e.name);
+          }
           var lnl = dv.getUint16(e.lo + 26, true), lel = dv.getUint16(e.lo + 28, true);
           var start = e.lo + 30 + lnl + lel;
           var comp = u8.subarray(start, start + e.compSize);
-          if (e.method === 0){ files[e.name] = comp.slice(); return null; }
-          if (e.method === 8){ return inflateRaw(comp).then(function(out){ files[e.name] = out; }); }
+          /* 展開したデータは、中央ディレクトリに記録されたサイズとCRC32で必ず検証する。
+             不一致なら破損として読み込み自体を中止する（呼び出し側は既存データに触れない）。 */
+          var verify = function(out){
+            if (out.length !== e.uSize) throw new Error('ファイルのサイズが記録と一致しません（破損の可能性があります）: ' + e.name);
+            if (crc32(out) !== e.crc) throw new Error('CRC32が一致しません（ファイルが破損しています）: ' + e.name);
+            files[e.name] = out;
+          };
+          if (e.method === 0){ verify(comp.slice()); return null; }
+          if (e.method === 8){ return inflateRaw(comp).then(verify); }
           throw new Error('未対応の圧縮形式のファイルが含まれています: ' + e.name);
         });
       });
@@ -614,6 +630,38 @@
         r.onerror = function(){ rej(r.error); };
       });
     }
+    function collectAllData(){
+      var data = {};
+      var chain = Promise.resolve();
+      STORES.forEach(function(s){
+        chain = chain.then(function(){ return dbAll(s).then(function(rows){ data[s] = rows; }); });
+      });
+      return chain.then(function(){ return data; });
+    }
+    /* 全ストアの消去と書き込みを「1つのIndexedDBトランザクション」で行う。
+       途中でエラーが起きればトランザクションごと中止（abort）され、
+       既存データは変更前の状態のまま保持される。 */
+    function replaceAllIn(database, data){
+      return new Promise(function(res, rej){
+        var tx;
+        try { tx = database.transaction(STORES, 'readwrite'); }
+        catch(e){ rej(e); return; }
+        var settled = false;
+        tx.oncomplete = function(){ if (!settled){ settled = true; res(); } };
+        tx.onabort = function(){ if (!settled){ settled = true; rej(tx.error || new Error('書き込みが中止されました')); } };
+        tx.onerror = function(){ if (!settled){ settled = true; rej(tx.error || new Error('書き込み中にエラーが発生しました')); } };
+        try {
+          STORES.forEach(function(s){
+            var os = tx.objectStore(s);
+            os.clear();
+            (data[s] || []).forEach(function(rec){ os.put(rec); });
+          });
+        } catch(e){
+          try { tx.abort(); } catch(_){}
+          if (!settled){ settled = true; rej(e); }
+        }
+      });
+    }
     function saveRecord(store, rec){
       var t = nowIso();
       if (!rec.id) rec.id = genId(store.replace(/s$/,''));
@@ -632,10 +680,86 @@
     }
 
     /* ================= 版管理・移行 =================
-       MIGRATIONS: 将来 SCHEMA_VERSION を上げたときに、版ごとの移行処理をここへ追加する。
-       例) 2: function(){ return Promise.resolve(); }  // v1 -> v2 の移行
-       移行は既存データを削除しないことを原則とする。 */
-    var MIGRATIONS = {};
+       MIGRATIONS[版] は、その版へ上げるための「データ変換関数」。
+       引数 data は {ストア名: レコード配列} のディープコピーで、変換後の data を返す。
+       変換はメモリ上だけで行い、実データベースには一切触れない。失敗時は例外を投げること。
+       起動時移行・旧版バックアップの復元はどちらも「メモリ上で移行と検証を行い、
+       成功した場合のみ単一トランザクションで書き込む」方式で、失敗時は既存データを保持する。
+       v0 → v1 の変更点: 確認状態がフラットな項目（confirmed / source / articleRef / effectiveDate）
+       だったものを confirmation オブジェクトへ統合し、links の from / to を fromId / toId へ改名した。 */
+    var MIGRATIONS = {
+      1: function(data){
+        ['items','numbers','questions'].forEach(function(s){
+          (data[s] || []).forEach(function(r, i){
+            if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('移行できないレコードがあります（' + STORE_LABELS[s] + ' の ' + (i+1) + ' 件目）');
+            if (!r.confirmation){
+              r.confirmation = normalizeConfirmation({
+                status: r.confirmed === true ? 'confirmed' : 'unconfirmed',
+                source: r.source || '',
+                articleRef: r.articleRef || r.article || '',
+                effectiveDate: r.effectiveDate || '',
+                checkedAt: r.checkedAt || ''
+              });
+            }
+            delete r.confirmed; delete r.source; delete r.articleRef; delete r.article; delete r.effectiveDate; delete r.checkedAt;
+          });
+        });
+        (data.links || []).forEach(function(r, i){
+          if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('移行できないレコードがあります（関連付け の ' + (i+1) + ' 件目）');
+          if (r.fromId == null && r.from != null) r.fromId = r.from;
+          if (r.toId == null && r.to != null) r.toId = r.to;
+          delete r.from; delete r.to;
+        });
+        STORES.forEach(function(s){
+          (data[s] || []).forEach(function(r){
+            if (r && typeof r === 'object' && !Array.isArray(r)){
+              if (!r.createdAt) r.createdAt = r.updatedAt || '';
+              if (!r.updatedAt) r.updatedAt = r.createdAt || '';
+            }
+          });
+        });
+        return data;
+      }
+    };
+    /* 全ストア分のレコード形式を検証する：レコードはオブジェクトで、
+       空でない文字列IDを持ち、同一ストア内でIDが重複しないこと。 */
+    function validateAllRecords(data){
+      STORES.forEach(function(s){
+        var rows = data ? data[s] : null;
+        if (rows == null) return;
+        if (!Array.isArray(rows)) throw new Error('データの形式が正しくありません（' + STORE_LABELS[s] + '）');
+        var seen = {};
+        rows.forEach(function(r, i){
+          if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('壊れたレコードがあります（' + STORE_LABELS[s] + ' の ' + (i+1) + ' 件目）');
+          if (typeof r.id !== 'string' || !r.id) throw new Error('IDのないレコードがあります（' + STORE_LABELS[s] + ' の ' + (i+1) + ' 件目）');
+          if (seen[r.id]) throw new Error('IDが重複しています（' + STORE_LABELS[s] + '：' + r.id + '）');
+          seen[r.id] = 1;
+        });
+      });
+    }
+    /* 旧版データ（{ストア名: 配列}）をメモリ上だけで現行版へ移行する。
+       入力オブジェクトは変更せず、成功時は移行済みの新しいオブジェクトを返す。
+       失敗時は例外を投げ、入力と実データベースは無傷のままになる。 */
+    function migrateDataInMemory(input, fromVersion){
+      var data = JSON.parse(JSON.stringify(input || {}));
+      STORES.forEach(function(s){ if (!Array.isArray(data[s])) data[s] = []; });
+      validateAllRecords(data);
+      for (var v = fromVersion; v < SCHEMA_VERSION; v++){
+        var step = MIGRATIONS[v + 1];
+        if (!step) throw new Error('v' + v + ' から v' + (v+1) + ' への移行手順がありません');
+        data = step(data);
+        validateAllRecords(data);
+      }
+      return data;
+    }
+    function setSchemaRecordInData(data, version){
+      var meta = data.meta || (data.meta = []);
+      for (var i=0;i<meta.length;i++){
+        if (meta[i] && meta[i].id === 'schema'){ meta[i].schemaVersion = version; meta[i].updatedAt = nowIso(); return; }
+      }
+      var t = nowIso();
+      meta.push({id:'schema', schemaVersion: version, createdAt: t, updatedAt: t});
+    }
     function addMigrationLog(entry){
       return dbGet('meta', 'migrationLog').then(function(rec){
         rec = rec || {id:'migrationLog', entries:[], createdAt: nowIso()};
@@ -654,17 +778,22 @@
         }
         if (schema.schemaVersion < SCHEMA_VERSION){
           var from = schema.schemaVersion;
-          var chain = Promise.resolve();
-          for (var v = from + 1; v <= SCHEMA_VERSION; v++){
-            (function(step){
-              chain = chain.then(function(){ return MIGRATIONS[step] ? MIGRATIONS[step]() : null; });
-            })(v);
-          }
-          return chain.then(function(){
-            schema.schemaVersion = SCHEMA_VERSION; schema.updatedAt = t;
-            return dbPut('meta', schema);
-          }).then(function(){
-            return addMigrationLog({at:t, from:from, to:SCHEMA_VERSION, note:'データ構造を v' + from + ' から v' + SCHEMA_VERSION + ' へ移行しました（既存データは保持）'});
+          /* 旧版データは、まず全データをメモリに読み込んで移行・検証し、
+             成功した場合のみ単一トランザクションで書き戻す。
+             移行・検証・書き込みのどこで失敗しても、既存データは変更しない。 */
+          return collectAllData().then(function(all){
+            var migrated;
+            try {
+              migrated = migrateDataInMemory(all, from);
+            } catch(e){
+              return addMigrationLog({at:t, from:from, to:SCHEMA_VERSION, note:'移行に失敗したため、既存データをそのまま保持しました。原因：' + (e && e.message ? e.message : '不明なエラー')});
+            }
+            setSchemaRecordInData(migrated, SCHEMA_VERSION);
+            return replaceAllIn(db, migrated).then(function(){
+              return addMigrationLog({at:t, from:from, to:SCHEMA_VERSION, note:'データ構造を v' + from + ' から v' + SCHEMA_VERSION + ' へ移行しました（メモリ上で検証後、単一トランザクションで書き込み）'});
+            }, function(e){
+              return addMigrationLog({at:t, from:from, to:SCHEMA_VERSION, note:'移行後の書き込みに失敗したため、既存データをそのまま保持しました。原因：' + (e && e.message ? e.message : '不明なエラー')});
+            });
           });
         }
         return addMigrationLog({at:t, from:schema.schemaVersion, to:SCHEMA_VERSION, note:'移行チェック済み：現在の版は v' + schema.schemaVersion + ' で、移行対象はありませんでした'});
@@ -1099,99 +1228,365 @@ renderItems();
 
     /* ================= 復元 ================= */
     var pendingRestore = null;
+    /* 画像バイト列が、バックアップに記録されたチェックサムと一致するか検証する。
+       記録が SHA-256（64桁16進）の場合は SHA-256 で、'crc32:' 形式の場合は CRC32 で照合する。 */
+    function verifyImageChecksum(u8, recorded){
+      if (!recorded || typeof recorded !== 'string') return Promise.resolve(false);
+      if (recorded.indexOf('crc32:') === 0) return Promise.resolve(crc32(u8).toString(16) === recorded.slice(6));
+      if (window.crypto && crypto.subtle && crypto.subtle.digest){
+        return sha256Hex(u8).then(function(h){ return h === recorded; }).catch(function(){ return false; });
+      }
+      return Promise.resolve(false);
+    }
+    /* バックアップの中身を「復元可能な状態」まで検証し、書き込み用データをメモリ上に用意する。
+       ZIP内の各ファイルのCRC32検証は zipParse で実施済み。ここでは manifest の構造・件数・
+       画像のSHA-256・全レコードの形式を検証し、旧版ならメモリ上で移行まで済ませる。
+       この関数は実データベースに一切触れないため、失敗しても既存データは無傷である。 */
+    function prepareRestore(manifest, files){
+      if (!manifest || typeof manifest !== 'object') return Promise.reject(new Error('manifest.json の形式が正しくありません。'));
+      if (manifest.appId !== 'horei-master' || !manifest.data || typeof manifest.data !== 'object') return Promise.reject(new Error('このファイルは法令マスターのバックアップではないようです。'));
+      var version = manifest.schemaVersion;
+      if (typeof version !== 'number' || isNaN(version)) return Promise.reject(new Error('データ構造の版が記録されていないため、復元できません。'));
+      if (version > SCHEMA_VERSION) return Promise.reject(new Error('このバックアップは新しいデータ構造（v' + version + '）で作られています。現在のアプリ（v' + SCHEMA_VERSION + '）では復元できません。'));
+      var data = JSON.parse(JSON.stringify(manifest.data));
+      STORES.forEach(function(s){ if (data[s] == null) data[s] = []; });
+      if (manifest.counts){
+        for (var ci=0; ci<STORES.length; ci++){
+          var cs = STORES[ci];
+          if (manifest.counts[cs] != null && manifest.counts[cs] !== (data[cs] || []).length){
+            return Promise.reject(new Error('件数が記録と一致しません（' + STORE_LABELS[cs] + '）。ファイルが壊れている可能性があります。'));
+          }
+        }
+      }
+      var checksums = manifest.imageChecksums || [];
+      var byId = {};
+      checksums.forEach(function(c){ if (c && c.id) byId[c.id] = c; });
+      var imgChain = Promise.resolve();
+      var verifiedImages = 0;
+      (data.images || []).forEach(function(img){
+        imgChain = imgChain.then(function(){
+          var chk = byId[img.id];
+          if (!chk) throw new Error('画像のチェックサム記録がありません（ID: ' + img.id + '）。検証できないため復元を中止します。');
+          if (chk.file){
+            var u8 = files[chk.file];
+            if (!u8) throw new Error('画像ファイルがZIP内に見つかりません: ' + chk.file);
+            return verifyImageChecksum(u8, chk.sha256).then(function(ok){
+              if (!ok) throw new Error('画像のSHA-256が一致しません（ファイルが破損・改変されています）: ' + chk.file);
+              img.dataBase64 = u8ToB64(u8);
+              img.checksumOk = true;
+              verifiedImages++;
+            });
+          }
+          return null;
+        });
+      });
+      return imgChain.then(function(){
+        var result;
+        if (version < SCHEMA_VERSION){
+          result = migrateDataInMemory(data, version);
+        } else {
+          validateAllRecords(data);
+          result = data;
+        }
+        STORES.forEach(function(s){
+          if (LAW_STORES[s]) (result[s] || []).forEach(function(rec){ rec.confirmation = normalizeConfirmation(rec.confirmation); });
+        });
+        setSchemaRecordInData(result, SCHEMA_VERSION);
+        return {data: result, fromVersion: version, verifiedImages: verifiedImages, fileCount: Object.keys(files).length};
+      });
+    }
     function handleRestoreFile(file){
       var box = $('restorePreview');
       pendingRestore = null;
       if (!file) { box.innerHTML = ''; return; }
-      box.innerHTML = '<div class="notice">ファイルを読み込んでいます…</div>';
+      box.innerHTML = '<div class="notice">ファイルを読み込み、整合性（CRC32・SHA-256）を検証しています…</div>';
       file.arrayBuffer().then(function(buf){
         return zipParse(buf);
       }).then(function(files){
         var m = files['manifest.json'];
         if (!m) throw new Error('manifest.json が見つかりません。法令マスターのバックアップファイルか確認してください。');
         var manifest = JSON.parse(new TextDecoder().decode(m));
-        if (manifest.appId !== 'horei-master' || !manifest.data) throw new Error('このファイルは法令マスターのバックアップではないようです。');
-        pendingRestore = {manifest: manifest, files: files};
-        var countsHtml = STORES.filter(function(s){ return s !== 'meta'; }).map(function(s){
-          var n = manifest.counts && manifest.counts[s] != null ? manifest.counts[s] : ((manifest.data[s] || []).length);
-          return '<div class="cell"><div class="n">' + esc(n) + '</div><div class="l">' + esc(STORE_LABELS[s]) + '</div></div>';
-        }).join('');
-        box.innerHTML =
-          '<div class="card" style="background:var(--surface2); margin:0">' +
-            '<h2>復元プレビュー</h2>' +
-            '<dl class="kv">' +
-              '<dt>書き出し日時</dt><dd>' + esc(fmtDateTime(manifest.exportedAt)) + '</dd>' +
-              '<dt>データ構造の版</dt><dd>v' + esc(manifest.schemaVersion) + '（現在のアプリは v' + SCHEMA_VERSION + '）</dd>' +
-              '<dt>アプリ</dt><dd>' + esc(manifest.app || '') + '</dd>' +
-              '<dt>画像チェックサム</dt><dd>' + esc((manifest.imageChecksums || []).length) + ' 件分を記録</dd>' +
-            '</dl>' +
-            '<div class="grid" style="margin-top:12px">' + countsHtml + '</div>' +
-            '<div class="warnbox" style="margin-top:12px"><strong>注意：</strong>復元すると、現在のデータはバックアップの内容で上書きされます。IDはバックアップ時のものがそのまま保持されます。心配な場合は、先に現在のバックアップを作成してください。</div>' +
-            '<div class="stack">' +
-              '<button class="btn ghost" type="button" id="preRestoreBackupBtn">復元前に現在のバックアップを作成</button>' +
-              '<button class="btn primary" type="button" id="doRestoreBtn">この内容で復元する</button>' +
-              '<button class="btn ghost" type="button" id="cancelRestoreBtn">やめる</button>' +
-            '</div>' +
-          '</div>';
-        $('preRestoreBackupBtn').addEventListener('click', function(){ createBackup(); });
-        $('cancelRestoreBtn').addEventListener('click', function(){ pendingRestore = null; box.innerHTML = ''; $('restoreFile').value = ''; });
-        $('doRestoreBtn').addEventListener('click', doRestore);
+        /* プレビューを出す前に、必要なデータと画像がすべて正常に読み込めて
+           検証を通ることを確認する。検証に失敗した場合はここで中止し、既存データには触れない。 */
+        return prepareRestore(manifest, files).then(function(prepared){
+          pendingRestore = {manifest: manifest, data: prepared.data, fromVersion: prepared.fromVersion};
+          var countsHtml = STORES.filter(function(s){ return s !== 'meta'; }).map(function(s){
+            var n = manifest.counts && manifest.counts[s] != null ? manifest.counts[s] : ((manifest.data[s] || []).length);
+            return '<div class="cell"><div class="n">' + esc(n) + '</div><div class="l">' + esc(STORE_LABELS[s]) + '</div></div>';
+          }).join('');
+          box.innerHTML =
+            '<div class="card" style="background:var(--surface2); margin:0">' +
+              '<h2>復元プレビュー</h2>' +
+              '<dl class="kv">' +
+                '<dt>書き出し日時</dt><dd>' + esc(fmtDateTime(manifest.exportedAt)) + '</dd>' +
+                '<dt>データ構造の版</dt><dd>v' + esc(manifest.schemaVersion) + '（現在のアプリは v' + SCHEMA_VERSION + '）</dd>' +
+                '<dt>アプリ</dt><dd>' + esc(manifest.app || '') + '</dd>' +
+                '<dt>画像チェックサム</dt><dd>' + esc((manifest.imageChecksums || []).length) + ' 件分を記録</dd>' +
+                '<dt>整合性チェック</dt><dd>ZIPのCRC32：全 ' + esc(prepared.fileCount) + ' ファイル一致 ／ 画像のSHA-256：' + esc(prepared.verifiedImages) + ' 件すべて一致（検証済み）</dd>' +
+                (prepared.fromVersion < SCHEMA_VERSION ? '<dt>データ移行</dt><dd>v' + esc(prepared.fromVersion) + ' → v' + SCHEMA_VERSION + ' へ移行して復元します（メモリ上で検証済み）</dd>' : '') +
+              '</dl>' +
+              '<div class="grid" style="margin-top:12px">' + countsHtml + '</div>' +
+              '<div class="warnbox" style="margin-top:12px"><strong>注意：</strong>復元すると、現在のデータはバックアップの内容で上書きされます。書き込みは1つのトランザクションで原子的に行われ、途中で失敗した場合は現在のデータがそのまま保持されます。IDはバックアップ時のものがそのまま保持されます。心配な場合は、先に現在のバックアップを作成してください。</div>' +
+              '<div class="stack">' +
+                '<button class="btn ghost" type="button" id="preRestoreBackupBtn">復元前に現在のバックアップを作成</button>' +
+                '<button class="btn primary" type="button" id="doRestoreBtn">この内容で復元する</button>' +
+                '<button class="btn ghost" type="button" id="cancelRestoreBtn">やめる</button>' +
+              '</div>' +
+            '</div>';
+          $('preRestoreBackupBtn').addEventListener('click', function(){ createBackup(); });
+          $('cancelRestoreBtn').addEventListener('click', function(){ pendingRestore = null; box.innerHTML = ''; $('restoreFile').value = ''; });
+          $('doRestoreBtn').addEventListener('click', doRestore);
+        });
       }).catch(function(e){
-        box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>読み込めませんでした。</strong><br>' + esc(e && e.message ? e.message : '不明なエラー') + '</div>';
+        box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>このファイルは復元できません。既存データは変更されていません。</strong><br>' + esc(e && e.message ? e.message : '不明なエラー') + '</div>';
       });
     }
     function doRestore(){
       if (!pendingRestore || !db){ toast('復元できるデータがありません'); return; }
-      var manifest = pendingRestore.manifest;
-      var files = pendingRestore.files;
+      var prepared = pendingRestore;
+      var manifest = prepared.manifest;
       askConfirm('復元を実行しますか？',
-        '現在のデータはバックアップ（' + esc(fmtDateTime(manifest.exportedAt)) + ' 書き出し）の内容で上書きされます。この操作は元に戻せません。',
+        '現在のデータはバックアップ（' + esc(fmtDateTime(manifest.exportedAt)) + ' 書き出し）の内容で上書きされます。書き込みは1つのトランザクションで原子的に行われ、途中で失敗した場合は現在のデータがそのまま保持されます。',
         '上書きして復元する'
       ).then(function(ok){
         if (!ok) return;
-        var chain = Promise.resolve();
-        STORES.forEach(function(s){ chain = chain.then(function(){ return dbClear(s); }); });
-        chain = chain.then(function(){
-          var putChain = Promise.resolve();
-          STORES.forEach(function(s){
-            if (s === 'images') return;
-            (manifest.data[s] || []).forEach(function(rec){
-              putChain = putChain.then(function(){
-                if (LAW_STORES[s]) rec.confirmation = normalizeConfirmation(rec.confirmation);
-                return dbPut(s, rec);
-              });
-            });
-          });
-          (manifest.data.images || []).forEach(function(img){
-            putChain = putChain.then(function(){
-              var copy = {};
-              Object.keys(img).forEach(function(k){ copy[k] = img[k]; });
-              var chk = (manifest.imageChecksums || []).filter(function(c){ return c.id === img.id; })[0];
-              if (chk && chk.file && files[chk.file]){
-                var u8 = files[chk.file];
-                copy.dataBase64 = u8ToB64(u8);
-                return sha256Hex(u8).then(function(h){
-                  copy.checksumOk = (!chk.sha256 || chk.sha256.indexOf('crc32:') === 0) ? copy.checksumOk : (h === chk.sha256);
-                  return dbPut('images', copy);
-                });
-              }
-              return dbPut('images', copy);
-            });
-          });
-          return putChain;
-        }).then(function(){
-          return runMigrationCheck();
-        }).then(function(){
-          return addMigrationLog({at: nowIso(), from: SCHEMA_VERSION, to: SCHEMA_VERSION, note:'バックアップ（' + fmtDateTime(manifest.exportedAt) + ' 書き出し）から復元しました'});
+        var box = $('restorePreview');
+        box.innerHTML = '<div class="notice">復元しています…</div>';
+        /* 検証・移行は prepareRestore で完了済み。ここでは全ストアの消去と書き込みを
+           単一トランザクションで実行するだけなので、途中エラーでも既存データは失われない。 */
+        replaceAllIn(db, prepared.data).then(function(){
+          return addMigrationLog({at: nowIso(), from: prepared.fromVersion, to: SCHEMA_VERSION, note:'バックアップ（' + fmtDateTime(manifest.exportedAt) + ' 書き出し）から復元しました' + (prepared.fromVersion < SCHEMA_VERSION ? '（v' + prepared.fromVersion + ' → v' + SCHEMA_VERSION + ' の移行を含む）' : '')});
         }).then(function(){
           pendingRestore = null;
-          $('restorePreview').innerHTML = '<div class="okbox" style="margin:0">復元が完了しました。IDはバックアップ時のまま保持されています。</div>';
+          box.innerHTML = '<div class="okbox" style="margin:0">復元が完了しました。IDはバックアップ時のまま保持されています。</div>';
           $('restoreFile').value = '';
           refreshAll(); renderItems(); renderQuestions(); renderNumbers();
           toast('復元が完了しました');
-        }).catch(function(){
-          $('restorePreview').innerHTML = '<div class="dangerbox" style="margin:0"><strong>復元に失敗しました。</strong>データが不完全な状態の可能性があるため、バックアップから再度復元するか、全データ削除後に復元し直してください。</div>';
+        }).catch(function(e){
+          getCounts().then(function(counts){
+            var summary = STORES.filter(function(s){ return s !== 'meta'; }).map(function(s){ return STORE_LABELS[s] + ' ' + counts[s] + '件'; }).join('、');
+            box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>復元に失敗しました。</strong><br>原因：' + esc(e && e.message ? e.message : '不明なエラー') + '<br>書き込みは取り消され、<strong>既存データは保持されています</strong>。現在の件数：' + esc(summary) + '</div>';
+            refreshAll();
+          }).catch(function(){
+            box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>復元に失敗しました。</strong><br>原因：' + esc(e && e.message ? e.message : '不明なエラー') + '<br>書き込みは取り消され、<strong>既存データは保持されています</strong>（ホームの件数表示で確認できます）。</div>';
+          });
         });
+      });
+    }
+
+    /* ================= 安全性テスト =================
+       本番と同じ関数（zipBuild / zipParse / prepareRestore / replaceAllIn /
+       migrateDataInMemory）を使って検証する。テストはメモリ上とテスト専用
+       データベースでのみ行い、実データには書き込まない。 */
+    function blobToArrayBuffer(blob){
+      if (blob.arrayBuffer) return blob.arrayBuffer();
+      return new Promise(function(res, rej){
+        var r = new FileReader();
+        r.onload = function(){ res(r.result); };
+        r.onerror = function(){ rej(r.error || new Error('読み込みに失敗しました')); };
+        r.readAsArrayBuffer(blob);
+      });
+    }
+    function findBytes(hay, needle){
+      for (var i=0; i + needle.length <= hay.length; i++){
+        var ok = true;
+        for (var j=0; j<needle.length; j++){ if (hay[i+j] !== needle[j]){ ok = false; break; } }
+        if (ok) return i;
+      }
+      return -1;
+    }
+    function makeTestBackup(){
+      var imgBytes = new Uint8Array([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A, 11,22,33,44,55,66,77,88, 99,111,122,123]);
+      var t = nowIso();
+      var data = {
+        meta:[{id:'schema', schemaVersion: SCHEMA_VERSION, createdAt:t, updatedAt:t}],
+        items:[{id:'item_test_1', title:'安全性テスト用項目', law:'地方自治法', confirmation:{status:'unconfirmed', source:'', articleRef:'', effectiveDate:'', checkedAt:''}, createdAt:t, updatedAt:t}],
+        images:[{id:'image_test_1', mimeType:'image/png', createdAt:t, updatedAt:t}],
+        numbers:[], questions:[], histories:[], annotations:[], links:[], settingsData:[]
+      };
+      return sha256Hex(imgBytes).then(function(h){
+        var counts = {};
+        STORES.forEach(function(s){ counts[s] = (data[s] || []).length; });
+        var manifest = {app:'法令マスター', appId:'horei-master', backupFormat:1, schemaVersion: SCHEMA_VERSION, exportedAt:t, counts:counts,
+          imageChecksums:[{id:'image_test_1', file:'images/image_test_1.png', sha256:h}], apiKeyIncluded:false, data:data};
+        return {manifest: manifest, imgBytes: imgBytes};
+      });
+    }
+    function zipFromTestManifest(manifest, imgBytes){
+      var files = [{name:'manifest.json', data: new TextEncoder().encode(JSON.stringify(manifest, null, 2))}, {name:'images/', data: new Uint8Array(0)}];
+      if (imgBytes) files.push({name:'images/image_test_1.png', data: imgBytes});
+      return zipBuild(files);
+    }
+    function testRestoreOk(record){
+      return makeTestBackup().then(function(tb){
+        return blobToArrayBuffer(zipFromTestManifest(tb.manifest, tb.imgBytes)).then(function(buf){
+          return zipParse(buf).then(function(files){
+            var manifest = JSON.parse(new TextDecoder().decode(files['manifest.json']));
+            return prepareRestore(manifest, files).then(function(prepared){
+              var ok = prepared.data.items.length === 1 && prepared.data.items[0].id === 'item_test_1'
+                && prepared.data.images.length === 1 && !!prepared.data.images[0].dataBase64
+                && b64ToU8(prepared.data.images[0].dataBase64).length === tb.imgBytes.length
+                && prepared.verifiedImages === 1;
+              record('正常なZIPの復元（検証つき）', ok, ok ? 'CRC32・SHA-256の検証を通過し、項目・画像が復元可能な状態になりました' : '復元データの内容が期待と異なります');
+            });
+          });
+        });
+      }).catch(function(e){ record('正常なZIPの復元（検証つき）', false, e && e.message ? e.message : '不明なエラー'); });
+    }
+    function testCorruptZip(record){
+      return makeTestBackup().then(function(tb){
+        return blobToArrayBuffer(zipFromTestManifest(tb.manifest, tb.imgBytes)).then(function(buf){
+          var u8 = new Uint8Array(buf.slice(0));
+          var needle = new TextEncoder().encode('horei-master');
+          var idx = findBytes(u8, needle);
+          if (idx < 0) throw new Error('テスト用ZIPの破損位置を特定できませんでした');
+          u8[idx + 2] = u8[idx + 2] ^ 0xFF;
+          return zipParse(u8.buffer).then(function(){
+            record('破損ZIPの拒否（CRC32）', false, '破損したZIPが拒否されませんでした');
+          }, function(e){
+            var ok = /CRC32/.test(e && e.message ? e.message : '');
+            record('破損ZIPの拒否（CRC32）', ok, ok ? 'CRC32の不一致を検出して読み込みを中止しました' : '別の理由で失敗しました：' + (e && e.message ? e.message : ''));
+          });
+        });
+      }).catch(function(e){ record('破損ZIPの拒否（CRC32）', false, e && e.message ? e.message : '不明なエラー'); });
+    }
+    function testBadChecksum(record){
+      return makeTestBackup().then(function(tb){
+        var manifest = JSON.parse(JSON.stringify(tb.manifest));
+        manifest.imageChecksums[0].sha256 = '0000000000000000000000000000000000000000000000000000000000000000';
+        return blobToArrayBuffer(zipFromTestManifest(manifest, tb.imgBytes)).then(function(buf){
+          return zipParse(buf).then(function(files){
+            var parsed = JSON.parse(new TextDecoder().decode(files['manifest.json']));
+            return prepareRestore(parsed, files).then(function(){
+              record('画像SHA-256不一致の拒否', false, 'チェックサム不一致の画像が拒否されませんでした');
+            }, function(e){
+              var ok = /SHA-256/.test(e && e.message ? e.message : '');
+              record('画像SHA-256不一致の拒否', ok, ok ? 'SHA-256の不一致を検出して復元を中止しました' : '別の理由で失敗しました：' + (e && e.message ? e.message : ''));
+            });
+          });
+        });
+      }).catch(function(e){ record('画像SHA-256不一致の拒否', false, e && e.message ? e.message : '不明なエラー'); });
+    }
+    function openSelfTestDB(){
+      return new Promise(function(res, rej){
+        var req = indexedDB.open('horei-master-db-selftest', 1);
+        req.onupgradeneeded = function(ev){
+          var d = ev.target.result;
+          STORES.forEach(function(s){ if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, {keyPath:'id'}); });
+        };
+        req.onsuccess = function(){ res(req.result); };
+        req.onerror = function(){ rej(req.error || new Error('テスト用データベースを開けませんでした')); };
+      });
+    }
+    function allFrom(database, store){
+      return new Promise(function(res, rej){
+        var r = database.transaction(store, 'readonly').objectStore(store).getAll();
+        r.onsuccess = function(){ res(r.result || []); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
+    function emptyDataSet(){
+      var d = {};
+      STORES.forEach(function(s){ d[s] = []; });
+      return d;
+    }
+    function testAtomicWrite(record){
+      var name = '復元途中のエラー（既存データ保持）';
+      var tdb = null;
+      var dataA = emptyDataSet();
+      dataA.items = [{id:'item_atomic_a', title:'原子性テストA', createdAt: nowIso(), updatedAt: nowIso()}];
+      var dataB = emptyDataSet();
+      dataB.items = [{id:'item_atomic_b', title:'原子性テストB', createdAt: nowIso(), updatedAt: nowIso()}, {title:'IDのない壊れたレコード'}];
+      return openSelfTestDB().then(function(d){
+        tdb = d;
+        return replaceAllIn(tdb, dataA);
+      }).then(function(){
+        return replaceAllIn(tdb, dataB).then(function(){
+          throw new Error('壊れたレコードを含む書き込みが成功してしまいました');
+        }, function(){ return null; });
+      }).then(function(){
+        return allFrom(tdb, 'items');
+      }).then(function(rows){
+        var ok = rows.length === 1 && rows[0].id === 'item_atomic_a';
+        record(name, ok, ok ? '書き込み途中のエラーでトランザクションが中止され、テスト用DBの既存データが保持されました' : '既存データが保持されませんでした');
+        if (tdb){ tdb.close(); tdb = null; }
+        try { indexedDB.deleteDatabase('horei-master-db-selftest'); } catch(e){}
+      }).catch(function(e){
+        if (tdb){ try { tdb.close(); } catch(_){} }
+        try { indexedDB.deleteDatabase('horei-master-db-selftest'); } catch(_){}
+        record(name, false, e && e.message ? e.message : '不明なエラー');
+      });
+    }
+    function makeV0Fixture(){
+      var t = '2026-01-01T00:00:00.000Z';
+      return {
+        meta:[{id:'schema', schemaVersion:0, createdAt:t, updatedAt:t}],
+        items:[
+          {id:'item_v0_1', title:'旧版の項目（3点そろった確認済み）', law:'地方自治法', confirmed:true, source:'e-Gov法令検索', articleRef:'地方自治法 第2条', effectiveDate:'2024-04-01', checkedAt:t, createdAt:t, updatedAt:t},
+          {id:'item_v0_2', title:'旧版の項目（施行日なし）', law:'地方自治法', confirmed:true, source:'e-Gov法令検索', articleRef:'地方自治法 第3条', effectiveDate:'', createdAt:t, updatedAt:t}
+        ],
+        images:[], numbers:[], questions:[], histories:[], annotations:[],
+        links:[{id:'link_v0_1', from:'item_v0_1', to:'item_v0_2', type:'item-item', createdAt:t, updatedAt:t}],
+        settingsData:[]
+      };
+    }
+    function testMigration(record){
+      /* 移行の成功ケース：v0フィクスチャが v1 形式へ正しく変換され、元データは無傷 */
+      try {
+        var fixture = makeV0Fixture();
+        var snapshot = JSON.stringify(fixture);
+        var migrated = migrateDataInMemory(fixture, 0);
+        var c1 = migrated.items[0].confirmation || {};
+        var c2 = migrated.items[1].confirmation || {};
+        var link = migrated.links[0] || {};
+        var ok = c1.status === 'confirmed' && c1.source === 'e-Gov法令検索' && c1.articleRef === '地方自治法 第2条' && c1.effectiveDate === '2024-04-01'
+          && c2.status === 'unconfirmed'
+          && link.fromId === 'item_v0_1' && link.toId === 'item_v0_2' && !('from' in link) && !('to' in link)
+          && migrated.items[0].id === 'item_v0_1' && !('confirmed' in migrated.items[0])
+          && JSON.stringify(fixture) === snapshot;
+        record('移行の成功（v0 → v1）', ok, ok ? '確認状態の統合・関連付けの項目名変更が正しく行われ、元のテストデータは変更されませんでした（施行日のない記録は確認済みになりません）' : '移行結果が期待と異なります');
+      } catch(e){
+        record('移行の成功（v0 → v1）', false, e && e.message ? e.message : '不明なエラー');
+      }
+      /* 移行の失敗ケース：壊れたレコードを含むフィクスチャでは移行が中止され、元データは無傷 */
+      try {
+        var broken = makeV0Fixture();
+        broken.items.push({title:'IDのない壊れたレコード'});
+        var snapshot2 = JSON.stringify(broken);
+        var threw = false;
+        try { migrateDataInMemory(broken, 0); } catch(e2){ threw = true; }
+        var ok2 = threw && JSON.stringify(broken) === snapshot2;
+        record('移行の失敗（既存データ保持）', ok2, ok2 ? '壊れたレコードを検出して移行を中止し、元のテストデータは変更されませんでした' : '移行失敗時の保持が確認できませんでした');
+      } catch(e){
+        record('移行の失敗（既存データ保持）', false, e && e.message ? e.message : '不明なエラー');
+      }
+    }
+    function runSafetyTests(){
+      var box = $('safetyTestResults');
+      if (!idbAvailable || !db){ box.innerHTML = '<div class="dangerbox" style="margin:0">IndexedDBが使えないため、安全性テストを実行できません。</div>'; return; }
+      box.innerHTML = '<div class="notice">安全性テストを実行しています…（あなたの保存データは変更されません）</div>';
+      var results = [];
+      function record(name, ok, detail){ results.push({name: name, ok: !!ok, detail: detail || ''}); }
+      var beforeCounts = null;
+      getCounts().then(function(c){ beforeCounts = c; })
+      .then(function(){ return testRestoreOk(record); })
+      .then(function(){ return testCorruptZip(record); })
+      .then(function(){ return testBadChecksum(record); })
+      .then(function(){ return testAtomicWrite(record); })
+      .then(function(){ testMigration(record); })
+      .then(function(){ return getCounts(); })
+      .then(function(afterCounts){
+        var same = STORES.every(function(s){ return beforeCounts[s] === afterCounts[s]; });
+        record('実データが変更されていないこと', same, same ? '全ストアの件数がテスト前と一致しました' : 'テスト前後で件数が変わっています');
+        var passed = results.filter(function(r){ return r.ok; }).length;
+        var html = '<div class="logbox">' + results.map(function(r){
+          return '<div class="entry"><strong style="color:' + (r.ok ? 'var(--ok)' : 'var(--danger)') + '">' + (r.ok ? '○ 成功' : '× 失敗') + '</strong>　' + esc(r.name) + (r.detail ? '<br><span class="tiny">' + esc(r.detail) + '</span>' : '') + '</div>';
+        }).join('') + '</div>';
+        html += '<p class="small" style="margin-top:8px">結果：' + passed + ' / ' + results.length + ' 件が成功しました。</p>';
+        box.innerHTML = html;
+        return addMigrationLog({at: nowIso(), from: SCHEMA_VERSION, to: SCHEMA_VERSION, note:'安全性テストを実行しました（' + passed + ' / ' + results.length + ' 件成功）：' + results.map(function(r){ return (r.ok ? '○' : '×') + r.name; }).join('、')}).then(function(){ return renderMigrationLog(); });
+      }).catch(function(e){
+        box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>安全性テストの実行中にエラーが発生しました。</strong><br>' + esc(e && e.message ? e.message : '不明なエラー') + '</div>';
       });
     }
 
@@ -1246,6 +1641,7 @@ renderItems();
       $('backupBtn').addEventListener('click', function(){ createBackup(); });
       $('restoreFile').addEventListener('change', function(){ handleRestoreFile(this.files && this.files[0]); });
       $('deleteAllBtn').addEventListener('click', deleteAllData);
+      $('runSafetyTestsBtn').addEventListener('click', runSafetyTests);
     }
     function init(){
       bindEvents();
