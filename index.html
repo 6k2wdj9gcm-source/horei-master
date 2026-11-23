@@ -2013,18 +2013,105 @@ renderItems();
     }
 
     /* ================= フェーズ1：Gemini OCR =================
-       モデルは gemini-3.8-flash を既定とし、使えない場合は 3.7 → 3.6 → 3.5 →
-       3.5-flash-lite の順に自動で切り替える。generationConfig.temperature は
-       送らない（Gemini 3.6以降で非推奨となり400エラーの原因になりうるため）。
+       使うモデルは GEMINI_MODELS の中から、その日の状態で並び替えて決める。
+       ・前回成功したモデルを最初に試す（成功実績の優先）。
+       ・残りのモデルは実行のたびに開始位置をずらして順番に使う（ローテーション）。
+         1つのモデルの無料枠にリクエストが集中しないようにするため。
+       ・429（無料枠の上限）を返したモデルは「本日上限」として記録し、その日は
+         以後のOCRで自動的に飛ばす（無駄なリクエストと待ち時間を減らすため）。
+         記録は localStorage に日付つきで持ち、日付が変わると自動でリセットされる。
+       ・404（モデルが存在しない）は「利用不可」として日付をまたいで記録し、以後飛ばす。
+       ・モデルの状態は残り枠そのものではない。Googleは残り枠を事前に教えてくれないため、
+         429が返って初めて上限と分かる。この記録は、その判明済みの上限を覚えるためのもの。
+       generationConfig.temperature は送らない（Gemini 3.6以降で非推奨となり
+       400エラーの原因になりうるため）。
        503・500・502・504（サーバー混雑などの一時的なエラー）と通信失敗は、
        少し待って同じモデルで自動再試行し、それでも続く場合は次のモデルへ切り替える。
-       429（無料枠上限）は待機して再試行し、回復しなければ上限エラーとして表示する。
        401/403（キー無効）は即座に区別して表示する。
        有料枠へ自動で切り替えることはしない。OCRが失敗しても原本画像には触れない。
        送信する画像は、保存済みの原本には触れず、送信専用に長辺2560pxまでへ
        軽量化したコピーを使う（文字の判読に十分な解像度を保ちつつ、大きな
        写真でリクエストが重くなって失敗するのを防ぐため）。 */
     var GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+    var MODEL_STATE_KEY = 'horeiMaster.geminiModelState';
+    function todayKey(){
+      var d = new Date();
+      var p = function(n){ return ('0' + n).slice(-2); };
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+    function loadModelState(){
+      var fresh = {date: todayKey(), quota: {}, ok: {}, lastGood: '', rotation: 0, missing: {}};
+      try {
+        var raw = localStorage.getItem(MODEL_STATE_KEY);
+        if (!raw) return fresh;
+        var s = JSON.parse(raw);
+        if (!s || typeof s !== 'object') return fresh;
+        if (s.date !== todayKey()){
+          /* 日付が変わったら上限・成功回数・ローテーションはリセットし、
+             「前回成功したモデル」と「利用不可のモデル」だけを引き継ぐ */
+          fresh.lastGood = s.lastGood || '';
+          fresh.missing = s.missing || {};
+          return fresh;
+        }
+        return {
+          date: s.date,
+          quota: s.quota || {},
+          ok: s.ok || {},
+          lastGood: s.lastGood || '',
+          rotation: s.rotation || 0,
+          missing: s.missing || {}
+        };
+      } catch(e){ return fresh; }
+    }
+    function saveModelState(s){
+      try { localStorage.setItem(MODEL_STATE_KEY, JSON.stringify(s)); } catch(e){}
+    }
+    function markModelQuota(model){
+      var s = loadModelState();
+      s.quota = s.quota || {};
+      s.quota[model] = nowIso();
+      saveModelState(s);
+    }
+    function markModelOk(model){
+      var s = loadModelState();
+      s.ok = s.ok || {};
+      s.ok[model] = (s.ok[model] || 0) + 1;
+      s.lastGood = model;
+      saveModelState(s);
+    }
+    function markModelMissing(model){
+      var s = loadModelState();
+      s.missing = s.missing || {};
+      s.missing[model] = true;
+      saveModelState(s);
+    }
+    /* 今回試すモデルの順序：本日上限・利用不可を除き、前回成功を先頭に、
+       残りはローテーションで開始位置をずらす。全モデルが本日上限なら空配列。 */
+    function orderedModels(){
+      var s = loadModelState();
+      var avail = GEMINI_MODELS.filter(function(m){
+        return !(s.missing && s.missing[m]) && !(s.quota && s.quota[m]);
+      });
+      if (!avail.length) return [];
+      var start = ((s.rotation || 0) % avail.length + avail.length) % avail.length;
+      var ordered = avail.slice(start).concat(avail.slice(0, start));
+      if (s.lastGood && ordered.indexOf(s.lastGood) > 0){
+        ordered.splice(ordered.indexOf(s.lastGood), 1);
+        ordered.unshift(s.lastGood);
+      }
+      return ordered;
+    }
+    function modelStateSummary(){
+      var s = loadModelState();
+      var parts = GEMINI_MODELS.map(function(m){
+        var short = m.replace('gemini-', '');
+        if (s.missing && s.missing[m]) return short + '：利用不可';
+        if (s.quota && s.quota[m]) return short + '：本日の無料枠上限';
+        var n = (s.ok && s.ok[m]) || 0;
+        return short + '：利用可' + (n ? '（本日' + n + '回成功）' : '');
+      });
+      return '本日のモデル状況 — ' + parts.join(' ／ ');
+    }
     var OCR_PROMPT = [
       'あなたは日本の法令学習用の文字起こし（OCR）を行います。添付画像は、地方自治法・地方公務員法の参考書や条文のページです。画像内の文章を、できるだけ正確にそのまま文字起こししてください。',
       '守ること：',
@@ -2084,12 +2171,22 @@ renderItems();
         });
         var TRANSIENT = {500: 1, 502: 1, 503: 1, 504: 1};
         var lastTransient = 0;
+        var sawQuota = false;
+        /* ローテーションを1つ進めて保存し、今回試す順序を決める */
+        var st = loadModelState();
+        st.rotation = (st.rotation || 0) + 1;
+        saveModelState(st);
+        var models = orderedModels();
+        if (!models.length){
+          throw ocrError('quota', '本日は、利用できるすべてのモデルが無料枠の上限に達しています。各モデルの上限はアプリが記録しており、本日中は自動で飛ばすため、リクエストは送信していません。日付が変わると回復します。このアプリが有料枠へ自動で切り替えることはありません。保存済みの原本画像はそのまま残っています。');
+        }
         function attempt(modelIdx, tryIdx){
-          if (modelIdx >= GEMINI_MODELS.length){
+          if (modelIdx >= models.length){
             if (lastTransient) throw ocrError('busy', 'Geminiが混み合っています（エラー' + lastTransient + '）。自動で再試行と別モデルへの切り替えを行いましたが、回復しませんでした。しばらく時間をおいてから、もう一度OCRを実行してください。保存済みの原本画像はそのまま残っています。');
+            if (sawQuota) throw ocrError('quota', '無料枠の上限に達しました（エラー429）。本日上限に達したモデルはアプリが記録し、今日は自動で飛ばすようにしました。日付が変わると回復します。このアプリが有料枠へ自動で切り替えることはありません。');
             throw ocrError('model', '利用できるGeminiモデルがありませんでした（すべてのモデルで失敗しました）。時間をおいて再試行してください。');
           }
-          var model = GEMINI_MODELS[modelIdx];
+          var model = models[modelIdx];
           var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
           var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
           var timer = controller ? setTimeout(function(){ try { controller.abort(); } catch(e){} }, 90000) : null;
@@ -2102,23 +2199,28 @@ renderItems();
           return fetch(url, opts).then(function(resp){
             if (timer) clearTimeout(timer);
             if (resp.status === 401 || resp.status === 403) throw ocrError('auth', 'APIキーが無効か、このキーでは利用できません（エラー' + resp.status + '）。設定画面でキーを確認してください。');
-            if (resp.status === 404) return attempt(modelIdx + 1, 0);
-            if (resp.status === 429 || TRANSIENT[resp.status]){
-              var isQuota = (resp.status === 429);
-              if (!isQuota) lastTransient = resp.status;
-              var maxTries = isQuota ? 2 : 3;
-              if (tryIdx < maxTries){
+            if (resp.status === 404){ markModelMissing(model); return attempt(modelIdx + 1, 0); }
+            if (resp.status === 429){
+              /* 無料枠の上限：このモデルは本日上限として記録し、待たずに次のモデルへ。
+                 その日は以後のOCRでも自動的に飛ばされる。 */
+              sawQuota = true;
+              markModelQuota(model);
+              if (modelIdx + 1 < models.length){
+                note(model.replace('gemini-', '') + ' は本日の無料枠の上限に達しました。記録して本日中は飛ばし、別のモデルに切り替えます…');
+                return attempt(modelIdx + 1, 0);
+              }
+              throw ocrError('quota', '無料枠の上限に達しました（エラー429）。本日上限に達したモデルはアプリが記録し、今日は自動で飛ばすようにしました。日付が変わると回復します。このアプリが有料枠へ自動で切り替えることはありません。');
+            }
+            if (TRANSIENT[resp.status]){
+              lastTransient = resp.status;
+              if (tryIdx < 3){
                 var ra = parseInt((resp.headers && resp.headers.get('Retry-After')) || '', 10);
                 var delay;
                 if (!isNaN(ra) && ra > 0) delay = Math.min(ra * 1000, 30000);
-                else if (isQuota) delay = [6000, 14000][tryIdx] || 14000;
                 else delay = [2000, 5000, 10000][tryIdx] || 10000;
-                note(isQuota
-                  ? '無料枠の上限に近づいています。少し待って自動で再試行します…'
-                  : 'Geminiが混み合っています（エラー' + resp.status + '）。少し待って自動で再試行します…');
+                note('Geminiが混み合っています（エラー' + resp.status + '）。少し待って自動で再試行します…');
                 return ocrSleep(delay).then(function(){ return attempt(modelIdx, tryIdx + 1); });
               }
-              if (isQuota) throw ocrError('quota', '無料枠の上限に達しました（エラー429）。自動で再試行しましたが回復しませんでした。時間を置くと回復します。このアプリが有料枠へ自動で切り替えることはありません。');
               note('別のモデルに切り替えて再試行します…');
               return attempt(modelIdx + 1, 0);
             }
@@ -2135,6 +2237,7 @@ renderItems();
               if (parts) parts.forEach(function(p){ if (p && typeof p.text === 'string') text += p.text; });
               text = text.trim();
               if (!text) throw ocrError('api', 'AIから読み取り結果が返りませんでした。画像が鮮明でない場合は、撮り直して再試行してください。');
+              markModelOk(model);
               return {text: text, model: model};
             });
           }, function(){
@@ -2144,7 +2247,7 @@ renderItems();
               note('通信が不安定なため、少し待って自動で再試行します…');
               return ocrSleep(2500 * (tryIdx + 1)).then(function(){ return attempt(modelIdx, tryIdx + 1); });
             }
-            if (modelIdx + 1 < GEMINI_MODELS.length) return attempt(modelIdx + 1, 0);
+            if (modelIdx + 1 < models.length) return attempt(modelIdx + 1, 0);
             throw ocrError('network', '通信に失敗しました。ネットワーク接続を確認して、再試行してください。');
           });
         }
@@ -2196,6 +2299,7 @@ renderItems();
           html += '<div class="warnbox" style="margin:0 0 12px"><strong>Gemini APIキーが未設定です。</strong><br>OCRを使うには、設定画面であなたのAPIキーを登録してください。</div>';
           html += '<button class="btn primary block" type="button" id="ocrGoSettings">設定画面を開く</button>';
         }
+        html += '<p class="tiny" id="ocrModelState" style="margin:10px 0 0">' + esc(modelStateSummary()) + '</p>';
         html += '<div id="ocrMsg" style="margin-top:12px"></div>';
         html += '<button class="btn primary block" type="button" id="ocrRunBtn" style="margin-top:4px"' + (keyInfo ? '' : ' disabled') + '>' + (img.ocrText ? 'OCRを再実行する' : 'OCRを実行する') + '</button>';
         html += '<label class="flabel" for="ocrText">読み取り結果（修正できます）</label>';
@@ -2215,7 +2319,7 @@ renderItems();
           var msg = $('ocrMsg');
           runBtn.disabled = true;
           runBtn.textContent = 'AIが読み取り中です…';
-          msg.innerHTML = '<div class="notice">Gemini APIへ画像を送信して読み取っています。混雑時（エラー503など）は自動で再試行し、モデルが使えない場合は次のモデルを試します。</div>';
+          msg.innerHTML = '<div class="notice">Gemini APIへ画像を送信して読み取っています。前回成功したモデルを優先し、残りは順番をずらして使い分けるため、1つのモデルの無料枠に集中しません。本日の無料枠上限に達したモデルは記録され、その日は自動で飛ばされます。混雑時（エラー503など）は自動で再試行します。</div>';
           img.ocrStatus = 'running';
           dbPut('images', img).catch(function(){});
           geminiOcr(img, cur.key, function(statusMsg){
@@ -2232,6 +2336,7 @@ renderItems();
               var ta = $('ocrText');
               if (ta) ta.value = result.text;
               if (msg) msg.innerHTML = '<div class="okbox" style="margin:0">読み取りが完了しました（使用モデル：' + esc(result.model) + '）。内容を確認し、必要なら修正して「読み取り結果を保存する」を押してください。保存すると項目の本文へ反映されます。</div>';
+              var msOk = $('ocrModelState'); if (msOk) msOk.textContent = modelStateSummary();
               if (runBtn){ runBtn.disabled = false; runBtn.textContent = 'OCRを再実行する'; }
             });
           }).catch(function(e){
@@ -2241,6 +2346,7 @@ renderItems();
             img.ocrAt = nowIso();
             dbPut('images', img).catch(function(){});
             if (msg) msg.innerHTML = '<div class="dangerbox" style="margin:0"><strong>OCRに失敗しました。</strong><br>' + esc(img.ocrError) + '<br>保存済みの原本画像はそのまま残っています。下のボタンから再試行できます。</div>';
+            var msErr = $('ocrModelState'); if (msErr) msErr.textContent = modelStateSummary();
             if (runBtn){ runBtn.disabled = false; runBtn.textContent = '再試行する'; }
             renderUnlinked();
           });
