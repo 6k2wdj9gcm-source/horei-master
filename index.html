@@ -144,13 +144,33 @@
       .divider{height:1px; background:var(--border-soft); margin:16px 0;}
       .progressbar{height:8px; background:var(--surface3); border-radius:99px; overflow:hidden;}
       .progressbar > div{height:100%; background:var(--gold);}
+      /* phase1: images / OCR */
+      .thumbs{display:grid; grid-template-columns:repeat(3,1fr); gap:10px;}
+      .thumbcell{background:var(--surface2); border:1px solid var(--border-soft); border-radius:12px; padding:8px;}
+      .thumbcell img{width:100%; height:92px; object-fit:cover; border-radius:8px; display:block; background:var(--bg2);}
+      .thumbcell .cap{font-size:11px; color:var(--muted); margin-top:6px; line-height:1.45; word-break:break-all;}
+      .thumbcell .acts{display:flex; gap:6px; margin-top:6px;}
+      .thumbcell .acts .btn{flex:1; min-height:38px; padding:4px 4px; font-size:12px; border-radius:9px;}
+      .badge.ocr-done{color:var(--ok); background:var(--ok-dim); border:1px solid rgba(127,182,133,.4);}
+      .badge.ocr-err{color:var(--danger); background:var(--danger-dim); border:1px solid rgba(224,112,95,.4);}
+      .badge.ocr-none{color:var(--muted); background:var(--surface3); border:1px solid var(--border);}
+      #viewerOverlay{position:fixed; inset:0; z-index:70; background:rgba(0,0,0,.94); display:none; flex-direction:column;}
+      #viewerOverlay.open{display:flex;}
+      #viewerBar{display:flex; align-items:center; gap:10px; padding:10px 14px; color:var(--text);}
+      #viewerBar .ttl{flex:1; font-size:13px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+      #viewerScroll{flex:1; overflow:auto; -webkit-overflow-scrolling:touch;}
+      #viewerImg{display:block; margin:0 auto;}
+      #viewerImg.fit{max-width:100%; height:auto;}
+      #viewerImg.actual{max-width:none; width:auto;}
+      .ocrimg{width:100%; border-radius:12px; border:1px solid var(--border-soft); display:block; background:var(--bg2);}
+      textarea.ocrtext{min-height:220px; line-height:1.7;}
       @media (min-width:560px){ .grid{grid-template-columns:repeat(3,1fr);} }
     </style>
   </head>
   <body>
     <div class="app">
       <div class="topstrip">
-        <span class="chip">フェーズ0 ・ 基盤</span>
+        <span class="chip">フェーズ1 ・ 写真取り込み・OCR</span>
         <span class="chip gray"><span class="dot" id="dbDot"></span><span id="dbStatus">保存先を確認中…</span></span>
         <span class="spacer"></span>
         <span class="saved-at" id="savedAt"></span>
@@ -164,7 +184,7 @@
       <!-- ============ ホーム ============ -->
       <section class="view" id="view-home">
         <h1>今日の学習</h1>
-        <p class="lead">地方自治法・地方公務員法の学習基盤です。フェーズ0では保存・バックアップなどの土台を実装しています。</p>
+        <p class="lead">地方自治法・地方公務員法の学習基盤です。フェーズ1では、参考書のページ写真の取り込みとAI OCR（文字起こし）を実装しています。取り込みは「参考書」タブから行えます。</p>
 
         <div class="card">
           <h2>今日の復習</h2>
@@ -190,18 +210,36 @@
         </div>
 
         <div class="notice">
-          <strong>フェーズ0の範囲について</strong><br>
-          この画面と下部タブの構成、IndexedDB保存、安定ID、データ構造の版管理と移行、完全バックアップ／復元、Gemini APIキーの設定と送信先の説明がフェーズ0の実装範囲です。写真取り込み・OCR・問題演習・期限計算・赤ペンなどはフェーズ1以降で実装するため、ここには置いていません。
+          <strong>フェーズ1の範囲について</strong><br>
+          写真の取り込み（写真・ファイルから複数枚／カメラ撮影）、原本画像のIndexedDB保存、参考書項目への関連付け（ページ順の保持）と拡大表示、Gemini APIによるOCR（結果は必ず「未確認」として保存）がフェーズ1の実装範囲です。取り込んだ画像とOCR結果は完全バックアップ／復元の対象に含まれます。項目の編集・統合はフェーズ2、期限計算はフェーズ4、問題演習はフェーズ5で実装します。
         </div>
       </section>
 
       <!-- ============ 参考書 ============ -->
       <section class="view" id="view-reference">
         <h1>参考書</h1>
-        <p class="lead">保存されている参考書項目の一覧です（IndexedDBの items ストアから実際に読み込んでいます）。</p>
+        <p class="lead">参考書のページ写真を取り込み、AI OCRで文字に起こして項目として保存します。原本画像はそのまま保持され、OCR結果は項目の本文になります（必ず「未確認」から始まります）。</p>
+
+        <div class="card" id="importCard">
+          <h2>写真を取り込む</h2>
+          <p class="small">写真アプリ・ファイルアプリから1枚または複数枚を選べます。取り込んだ画像は原本のままIndexedDBに保存されます（表示用サムネイルは原本と別に持ちます）。1枚ずつ保存しながら進捗を表示し、失敗したファイルがあっても成功した分はそのまま保存されます。</p>
+          <div class="hstack">
+            <button class="btn primary" type="button" id="importPickBtn">写真・ファイルから選ぶ</button>
+            <button class="btn ghost" type="button" id="importCameraBtn">カメラで撮影</button>
+          </div>
+          <div id="importProgress" style="margin-top:12px"></div>
+          <div id="importResult" style="margin-top:12px"></div>
+        </div>
+
+        <div class="card" id="unlinkedCard" style="display:none">
+          <h2>まだ項目に関連付けていない画像</h2>
+          <p class="small">取り込み済みで、まだ参考書項目にまとめていない画像です。下の操作で、すべてを1つの項目にまとめるか、既存の項目へ追加できます（ページ順は表示順のまま保持されます）。</p>
+          <div id="unlinkedImages"></div>
+        </div>
+
         <div class="card flush" id="itemList"></div>
         <div class="notice">
-          写真の取り込み・OCR・項目の統合や編集はフェーズ1〜2で実装します。いまは保存と表示の確認ができます。動作確認用の項目は「設定」→「データ管理」から作成できます。
+          項目を開くと、関連付けた画像をページ順に確認でき、拡大表示とOCRができます。項目の編集・統合はフェーズ2で実装します。動作確認用の項目は「設定」→「データ管理」から作成できます。
         </div>
       </section>
 
@@ -370,6 +408,22 @@
         </div>
       </div>
     </div>
+
+    <!-- image viewer -->
+    <div id="viewerOverlay">
+      <div id="viewerBar">
+        <span class="ttl" id="viewerTitle"></span>
+        <button class="btn ghost sm" type="button" id="viewerFitBtn">原寸で見る</button>
+        <button class="btn ghost sm" type="button" id="viewerCloseBtn">閉じる</button>
+      </div>
+      <div id="viewerScroll"><img id="viewerImg" class="fit" alt="取り込んだ画像の拡大表示"></div>
+    </div>
+
+    <!-- hidden file inputs (phase 1 import) -->
+    <input type="file" id="importFiles" accept="image/*" multiple style="display:none">
+    <input type="file" id="importCamera" accept="image/*" capture="environment" style="display:none">
+    <input type="file" id="itemAddFiles" accept="image/*" multiple style="display:none">
+    <input type="file" id="itemAddCamera" accept="image/*" capture="environment" style="display:none">
 
     <div id="toast" role="status"></div>
 
@@ -623,6 +677,13 @@
         r.onerror = function(){ rej(r.error); };
       });
     }
+    function dbDelete(store, id){
+      return new Promise(function(res, rej){
+        var r = storeTx(store, 'readwrite').delete(id);
+        r.onsuccess = function(){ res(); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
     function dbClear(store){
       return new Promise(function(res, rej){
         var r = storeTx(store, 'readwrite').clear();
@@ -823,7 +884,7 @@ var btns = document.querySelectorAll('.tabbtn');
 for (var i=0;i<btns.length;i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
 window.scrollTo(0, 0);
 if (!skipSave && db) saveUiState({lastTab: tab});
-if (tab === 'reference') renderItems();
+if (tab === 'reference'){ renderItems(); renderUnlinked(); }
 if (tab === 'questions') renderQuestions();
 if (tab === 'dict') renderNumbers();
 }
@@ -861,14 +922,14 @@ function openSendInfo(){
 openModal(
 '<button class="closebtn" type="button" id="sendInfoCloseX" aria-label="閉じる">×</button>' +
 '<h2 style="padding-right:44px">AIを使うときに送られる情報</h2>' +
-'<p class="small">AI機能（フェーズ1以降で実装するOCR・問題生成・質問など）を使う場合、このアプリはあなたの端末から <strong>Google の Gemini API（generativelanguage.googleapis.com）</strong> へ直接リクエストを送ります。アプリ専用のサーバーはなく、他のサーバーへ内容が送られることはありません。</p>' +
+'<p class="small">AI機能（フェーズ1のOCR、今後実装する問題生成・質問など）を使う場合、このアプリはあなたの端末から <strong>Google の Gemini API（generativelanguage.googleapis.com）</strong> へ直接リクエストを送ります。アプリ専用のサーバーはなく、他のサーバーへ内容が送られることはありません。</p>' +
 '<h3>送るもの（AI機能を使うときに限ります）</h3>' +
 '<ul class="tight">' +
 '<li>読み取りたい写真の画像（OCRを使う場合）</li>' +
 '<li>対象の参考書項目のテキストや、あなたが入力した質問文</li>' +
 '<li>問題生成に必要な条文・数字などの学習データの一部</li>' +
 '</ul>' +
-'<p class="small">送信する前には、その都度、送信内容と送信先（Google）を画面でお知らせします。フェーズ0の時点ではAI機能自体が未実装のため、いまは何も送信されません。</p>' +
+'<p class="small">送信は、あなたがOCR画面で「OCRを実行する」を押した場合に限ります。送信されるのは、その画像1枚と読み取り指示のテキストです。</p>' +
 '<h3>送らないもの</h3>' +
 '<ul class="tight">' +
 '<li>APIキーは Google への認証にのみ使います。他のサーバーには送信しません。</li>' +
@@ -898,7 +959,7 @@ function renderKeyStatus(){
 var box = $('keyStatus');
 var cur = getStoredKey();
 if (!cur){
-box.innerHTML = '<div class="notice" style="margin-top:12px">APIキーはまだ登録されていません。フェーズ0では登録・保持の確認だけを行い、実際にAIへ送信する機能はまだありません。</div>';
+box.innerHTML = '<div class="notice" style="margin-top:12px">APIキーはまだ登録されていません。登録すると、フェーズ1のOCRで、あなたのキーを使ってGoogle Geminiへ画像を送信できるようになります（送信はOCRを実行したときだけです）。</div>';
 return;
 }
 var tail = cur.key.length >= 4? cur.key.slice(-4): '••••';
@@ -1041,7 +1102,7 @@ if (!db){ list.innerHTML = '<div class="empty">データベースが使えない
 dbAll('items').then(function(rows){
 rows.sort(function(a,b){ return String(a.createdAt||'').localeCompare(String(b.createdAt||''));});
 if (!rows.length){
-list.innerHTML = '<div class="empty">参考書項目はまだありません。<br>「設定」→「データ管理」から確認用サンプルデータを作成すると、ここに表示されます。</div>';
+list.innerHTML = '<div class="empty">参考書項目はまだありません。<br>上の「写真を取り込む」からページ写真を取り込んで項目を作るか、「設定」→「データ管理」から確認用サンプルデータを作成すると、ここに表示されます。</div>';
 return;
 }
 list.innerHTML = rows.map(function(r){
@@ -1064,10 +1125,19 @@ if (!db) return;
 dbGet('items', id).then(function(r){
 if (!r){ toast('項目が見つかりませんでした'); return;}
 saveUiState({lastTab:'reference', lastItemId: r.id, lastItemTitle: r.title || '', lastItemViewedAt: nowIso()}).then(function(){ renderResume();});
+itemImageLinks(id).then(function(pages){
 var html = '<h2>' + esc(r.title || '（無題）') + '</h2>';
 html += '<p style="margin:0 0 10px">' + confirmationBadge(r.confirmation) + (r.isSample? ' <span class="badge sample">動作確認用サンプル</span>': '') + '</p>';
 if (r.law || r.category) html += '<p class="small" style="margin:0 0 10px">' + esc(r.law || '') + (r.category? ' ・ ' + esc(r.category): '') + '</p>';
 if (r.body) html += '<div style="white-space:pre-wrap; font-size:15px">' + esc(r.body) + '</div>';
+html += '<div class="divider"></div><h3 style="margin-top:0">関連画像（ページ）</h3>';
+if (!pages.length){
+html += '<p class="small">関連付けられた画像はまだありません。下のボタンからページ写真を追加できます。</p>';
+} else {
+html += '<div class="thumbs">' + pages.map(function(p, i){ return imageCellHtml(p.img, 'p.' + (i + 1)); }).join('') + '</div>';
+html += '<p class="tiny" style="margin-top:8px">ページ順（取り込んだ順番）で表示しています。「拡大」で原本を確認でき、「OCR」でAI読み取りができます。</p>';
+}
+html += '<div class="hstack" style="margin-top:10px"><button class="btn ghost" type="button" id="itemAddPickBtn">画像を追加</button><button class="btn ghost" type="button" id="itemAddCamBtn">撮影して追加</button></div>';
 html += '<div class="divider"></div><h3>記録情報</h3>';
 html += '<dl class="kv"><dt>項目ID</dt><dd class="mono">' + esc(r.id) + '</dd>' +
 '<dt>作成日時</dt><dd>' + esc(fmtDateTime(r.createdAt)) + '</dd>' +
@@ -1077,6 +1147,10 @@ html += '<p class="tiny" style="margin-top:12px">この項目を開いたこと�
 html += '<button class="btn ghost block" type="button" id="sheetCloseBtn" style="margin-top:10px">閉じる</button>';
 openSheet(html);
 $('sheetCloseBtn').addEventListener('click', closeSheet);
+bindImageCells($('sheetBody'));
+$('itemAddPickBtn').addEventListener('click', function(){ addTargetItemId = id; $('itemAddFiles').click(); });
+$('itemAddCamBtn').addEventListener('click', function(){ addTargetItemId = id; $('itemAddCamera').click(); });
+});
 });
 }
 
@@ -1360,7 +1434,7 @@ renderItems();
           pendingRestore = null;
           box.innerHTML = '<div class="okbox" style="margin:0">復元が完了しました。IDはバックアップ時のまま保持されています。</div>';
           $('restoreFile').value = '';
-          refreshAll(); renderItems(); renderQuestions(); renderNumbers();
+          refreshAll(); renderItems(); renderQuestions(); renderNumbers(); renderUnlinked();
           toast('復元が完了しました');
         }).catch(function(e){
           getCounts().then(function(counts){
@@ -1608,7 +1682,7 @@ renderItems();
         }).then(function(){
           pendingRestore = null;
           $('restorePreview').innerHTML = '';
-          refreshAll(); renderItems(); renderQuestions(); renderNumbers();
+          refreshAll(); renderItems(); renderQuestions(); renderNumbers(); renderUnlinked();
           toast('全データを削除しました');
         });
       }).catch(function(){ toast('削除に失敗しました'); });
@@ -1616,6 +1690,485 @@ renderItems();
 
     /* ================= サンプル作成（設定画面から） ================= */
     /* createSampleData は前のスクリプトで定義済み */
+
+    /* ================= フェーズ1：写真取り込み =================
+       原本は images ストアに dataBase64（原本バイト列）としてそのまま保存する。
+       表示用サムネイルは thumbBase64 フィールドに別途持ち、原本とは区別する。
+       画像と項目の関連付けは links ストア（type: 'item-image'、order: ページ順）に保持する。 */
+    var importBusy = false;
+    var addTargetItemId = null;
+    function mimeGuess(file){
+      if (file.type) return file.type;
+      var n = (file.name || '').toLowerCase();
+      if (/\.png$/.test(n)) return 'image/png';
+      if (/\.webp$/.test(n)) return 'image/webp';
+      if (/\.gif$/.test(n)) return 'image/gif';
+      if (/\.heic$/.test(n)) return 'image/heic';
+      if (/\.heif$/.test(n)) return 'image/heif';
+      return 'image/jpeg';
+    }
+    function makeThumb(file){
+      return new Promise(function(res){
+        var url;
+        try { url = URL.createObjectURL(file); } catch(e){ res(null); return; }
+        var img = new Image();
+        var done = false;
+        function finish(v){ if (!done){ done = true; try { URL.revokeObjectURL(url); } catch(e){} res(v); } }
+        img.onload = function(){
+          try {
+            var w = img.naturalWidth, h = img.naturalHeight;
+            if (!w || !h){ finish(null); return; }
+            var scale = Math.min(1, 360 / Math.max(w, h));
+            var cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.round(w * scale));
+            cv.height = Math.max(1, Math.round(h * scale));
+            cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+            var du = cv.toDataURL('image/jpeg', 0.72);
+            finish({base64: du.split(',')[1], width: w, height: h});
+          } catch(e){ finish(null); }
+        };
+        img.onerror = function(){ finish(null); };
+        img.src = url;
+      });
+    }
+    function processOneFile(file){
+      var name = file.name || '画像';
+      var isImg = (file.type && file.type.indexOf('image/') === 0) || /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?)$/i.test(name);
+      if (!isImg) return Promise.reject(new Error('画像ファイルではありません'));
+      if (file.size === 0) return Promise.reject(new Error('ファイルが空です'));
+      return blobToArrayBuffer(file).then(function(buf){
+        var u8 = new Uint8Array(buf);
+        if (!u8.length) throw new Error('ファイルを読み込めませんでした');
+        var rec = {
+          id: genId('image'), name: name, mimeType: mimeGuess(file), size: u8.length,
+          kind: 'original', dataBase64: u8ToB64(u8),
+          ocrStatus: 'none', ocrText: '', ocrError: '', ocrModel: '',
+          createdAt: nowIso(), updatedAt: nowIso()
+        };
+        return makeThumb(file).then(function(th){
+          if (th){ rec.thumbBase64 = th.base64; rec.width = th.width; rec.height = th.height; }
+          return saveRecord('images', rec).then(function(){ return rec; });
+        });
+      });
+    }
+    function renderImportProgress(done, total, ok, ng){
+      var box = $('importProgress');
+      if (!box) return;
+      box.innerHTML = '<p class="small" style="margin:0 0 6px">' + esc(done) + ' / ' + esc(total) + ' 枚を処理済み（成功 ' + esc(ok) + ' ・ 失敗 ' + esc(ng) + '）</p>' +
+        '<div class="progressbar"><div style="width:' + (total ? Math.round(done / total * 100) : 0) + '%"></div></div>';
+    }
+    function renderImportResult(saved, failures, opts){
+      var html = '';
+      if (failures.length){
+        html += '<div class="dangerbox" style="margin:0 0 10px"><strong>取り込み結果：成功 ' + saved.length + ' 件 ・ 失敗 ' + failures.length + ' 件</strong><br>失敗したファイル：<ul class="tight">' +
+          failures.map(function(f){ return '<li>' + esc(f.name) + '：' + esc(f.reason) + '</li>'; }).join('') +
+          '</ul>成功した分はそのまま保存されています。</div>';
+      } else if (saved.length){
+        html += '<div class="okbox" style="margin:0 0 10px">取り込みが完了しました：' + saved.length + ' 件の画像を原本のまま保存しました。</div>';
+      }
+      if (opts.linkItemId && saved.length){
+        html += '<button class="btn primary block" type="button" id="importOpenItemBtn">追加した項目を開く</button>';
+      } else if (saved.length){
+        html += '<p class="small" style="margin:0">保存した画像は下の「まだ項目に関連付けていない画像」に表示されます。まとめて新しい項目にするか、既存の項目へ追加できます。</p>';
+      }
+      $('importResult').innerHTML = html;
+      var b = $('importOpenItemBtn');
+      if (b) b.addEventListener('click', function(){ openItem(opts.linkItemId); });
+    }
+    function importFiles(fileList, opts){
+      opts = opts || {};
+      if (!db){ toast('データベースが使えません'); return; }
+      var files = Array.prototype.slice.call(fileList || []);
+      if (!files.length) return;
+      if (importBusy){ toast('別の取り込みが進行中です'); return; }
+      importBusy = true;
+      closeSheet();
+      switchTab('reference');
+      var total = files.length, doneCount = 0;
+      var saved = [], failures = [];
+      $('importResult').innerHTML = '';
+      renderImportProgress(0, total, 0, 0);
+      var chain = Promise.resolve();
+      files.forEach(function(file){
+        chain = chain.then(function(){
+          return processOneFile(file).then(function(rec){
+            saved.push(rec);
+          }).catch(function(e){
+            failures.push({name: file.name || '（名前不明のファイル）', reason: e && e.message ? e.message : '保存に失敗しました'});
+          }).then(function(){
+            doneCount++;
+            renderImportProgress(doneCount, total, saved.length, failures.length);
+          });
+        });
+      });
+      chain.then(function(){
+        importBusy = false;
+        var finish = function(){
+          renderImportResult(saved, failures, opts);
+          refreshAll(); renderItems(); renderUnlinked();
+        };
+        if (opts.linkItemId && saved.length){
+          linkImagesToItem(opts.linkItemId, saved.map(function(r){ return r.id; })).then(finish, finish);
+        } else finish();
+      });
+    }
+
+    /* ================= フェーズ1：画像と項目の関連付け ================= */
+    function linkImagesToItem(itemId, imageIds){
+      return dbAll('links').then(function(links){
+        var max = 0;
+        links.forEach(function(l){ if (l.type === 'item-image' && l.fromId === itemId && typeof l.order === 'number' && l.order > max) max = l.order; });
+        var chain = Promise.resolve();
+        imageIds.forEach(function(imgId, i){
+          chain = chain.then(function(){
+            return saveRecord('links', {id: genId('link'), fromId: itemId, toId: imgId, type: 'item-image', order: max + i + 1});
+          });
+        });
+        return chain;
+      });
+    }
+    function itemImageLinks(itemId){
+      return dbAll('links').then(function(links){
+        var rel = links.filter(function(l){ return l.type === 'item-image' && l.fromId === itemId; });
+        rel.sort(function(a, b){
+          var oa = typeof a.order === 'number' ? a.order : 9999;
+          var ob = typeof b.order === 'number' ? b.order : 9999;
+          if (oa !== ob) return oa - ob;
+          return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+        });
+        var out = [];
+        var chain = Promise.resolve();
+        rel.forEach(function(l){
+          chain = chain.then(function(){
+            return dbGet('images', l.toId).then(function(img){ if (img) out.push({link: l, img: img}); });
+          });
+        });
+        return chain.then(function(){ return out; });
+      });
+    }
+    function imgSrc(img){
+      if (img.thumbBase64) return 'data:image/jpeg;base64,' + img.thumbBase64;
+      return 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
+    }
+    function ocrBadge(img){
+      if (img.ocrStatus === 'done') return '<span class="badge ocr-done">OCR済み</span>';
+      if (img.ocrStatus === 'error') return '<span class="badge ocr-err">OCR失敗</span>';
+      if (img.ocrStatus === 'running') return '<span class="badge phase">OCR実行中</span>';
+      return '<span class="badge ocr-none">OCR未実行</span>';
+    }
+    function imageCellHtml(img, pageLabel){
+      return '<div class="thumbcell">' +
+        '<img src="' + imgSrc(img) + '" alt="' + esc(img.name || '取り込んだ画像') + '">' +
+        '<div class="cap">' + (pageLabel ? esc(pageLabel) + ' ・ ' : '') + esc(img.name || '') + '<br>' + ocrBadge(img) + '</div>' +
+        '<div class="acts">' +
+          '<button class="btn ghost" type="button" data-img-act="view" data-img-id="' + esc(img.id) + '">拡大</button>' +
+          '<button class="btn ghost" type="button" data-img-act="ocr" data-img-id="' + esc(img.id) + '">OCR</button>' +
+          '<button class="btn ghost" type="button" data-img-act="del" data-img-id="' + esc(img.id) + '">削除</button>' +
+        '</div></div>';
+    }
+    function bindImageCells(container){
+      if (!container) return;
+      var btns = container.querySelectorAll('[data-img-act]');
+      for (var i = 0; i < btns.length; i++){
+        btns[i].addEventListener('click', function(){
+          var id = this.getAttribute('data-img-id');
+          var act = this.getAttribute('data-img-act');
+          if (act === 'view') viewImage(id);
+          else if (act === 'ocr') openOcr(id);
+          else if (act === 'del') deleteImage(id);
+        });
+      }
+    }
+    function viewImage(id){
+      if (!db) return;
+      dbGet('images', id).then(function(img){
+        if (!img){ toast('画像が見つかりませんでした'); return; }
+        openViewer(img);
+      });
+    }
+    function deleteImage(id){
+      askConfirm('この画像を削除しますか？',
+        '原本画像と、この画像への関連付けを削除します。項目の本文に反映済みのOCRテキストは残ります。この操作は元に戻せません（バックアップからの復元は可能です）。',
+        '削除する'
+      ).then(function(ok){
+        if (!ok) return;
+        return dbAll('links').then(function(links){
+          var chain = Promise.resolve();
+          links.forEach(function(l){
+            if (l.toId === id || l.fromId === id) chain = chain.then(function(){ return dbDelete('links', l.id); });
+          });
+          return chain;
+        }).then(function(){
+          return dbDelete('images', id);
+        }).then(function(){
+          toast('画像を削除しました');
+          closeSheet();
+          refreshAll(); renderItems(); renderUnlinked();
+        }).catch(function(){ toast('削除に失敗しました'); });
+      });
+    }
+    function renderUnlinked(){
+      var card = $('unlinkedCard');
+      var box = $('unlinkedImages');
+      if (!card || !box) return;
+      if (!db){ card.style.display = 'none'; return; }
+      Promise.all([dbAll('images'), dbAll('links'), dbAll('items')]).then(function(res){
+        var images = res[0], links = res[1], items = res[2];
+        var linked = {};
+        links.forEach(function(l){ if (l.type === 'item-image') linked[l.toId] = 1; });
+        var unlinked = images.filter(function(im){ return !linked[im.id]; });
+        unlinked.sort(function(a, b){ return String(a.createdAt || '').localeCompare(String(b.createdAt || '')); });
+        if (!unlinked.length){ card.style.display = 'none'; box.innerHTML = ''; return; }
+        card.style.display = '';
+        var html = '<div class="thumbs">' + unlinked.map(function(im){ return imageCellHtml(im, ''); }).join('') + '</div>';
+        html += '<div class="divider"></div>';
+        html += '<label class="flabel" for="unlinkedTitle">新しい項目のタイトル</label>' +
+          '<input type="text" id="unlinkedTitle" value="取り込んだページ（' + esc(fmtDate(nowIso())) + '）">';
+        html += '<label class="flabel" for="unlinkedLaw">法律</label>' +
+          '<select id="unlinkedLaw"><option>地方自治法</option><option>地方公務員法</option><option>その他</option></select>';
+        html += '<button class="btn primary block" type="button" id="unlinkedNewBtn" style="margin-top:12px">これらの画像で新しい項目を作る</button>';
+        if (items.length){
+          html += '<label class="flabel" for="unlinkedExisting">既存の項目に追加</label>' +
+            '<select id="unlinkedExisting">' + items.map(function(it){ return '<option value="' + esc(it.id) + '">' + esc(it.title || '（無題）') + '</option>'; }).join('') + '</select>';
+          html += '<button class="btn ghost block" type="button" id="unlinkedExistingBtn" style="margin-top:10px">選んだ項目に追加する</button>';
+        }
+        box.innerHTML = html;
+        bindImageCells(box);
+        var ids = unlinked.map(function(im){ return im.id; });
+        $('unlinkedNewBtn').addEventListener('click', function(){
+          var title = $('unlinkedTitle').value.trim() || '取り込んだページ';
+          var item = {id: genId('item'), title: title, law: $('unlinkedLaw').value, category: '写真取り込み', body: '',
+            confirmation: {status: 'unconfirmed', source: '', articleRef: '', effectiveDate: '', checkedAt: ''}};
+          saveRecord('items', item).then(function(){
+            return linkImagesToItem(item.id, ids);
+          }).then(function(){
+            toast('項目を作成し、画像を関連付けました');
+            refreshAll(); renderItems(); renderUnlinked();
+            openItem(item.id);
+          }).catch(function(){ toast('保存に失敗しました'); });
+        });
+        var eb = $('unlinkedExistingBtn');
+        if (eb) eb.addEventListener('click', function(){
+          var target = $('unlinkedExisting').value;
+          linkImagesToItem(target, ids).then(function(){
+            toast('項目に画像を追加しました');
+            refreshAll(); renderItems(); renderUnlinked();
+            openItem(target);
+          }).catch(function(){ toast('追加に失敗しました'); });
+        });
+      }).catch(function(){ card.style.display = 'none'; });
+    }
+
+    /* ================= フェーズ1：画像ビューア ================= */
+    var viewerFit = true;
+    function openViewer(img){
+      $('viewerTitle').textContent = img.name || '原本画像';
+      var im = $('viewerImg');
+      im.src = 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
+      viewerFit = true;
+      im.className = 'fit';
+      $('viewerFitBtn').textContent = '原寸で見る';
+      $('viewerScroll').scrollTop = 0;
+      $('viewerScroll').scrollLeft = 0;
+      $('viewerOverlay').classList.add('open');
+    }
+    function closeViewer(){ $('viewerOverlay').classList.remove('open'); $('viewerImg').removeAttribute('src'); }
+    function toggleViewerFit(){
+      viewerFit = !viewerFit;
+      $('viewerImg').className = viewerFit ? 'fit' : 'actual';
+      $('viewerFitBtn').textContent = viewerFit ? '原寸で見る' : '画面に合わせる';
+      $('viewerScroll').scrollTop = 0;
+      $('viewerScroll').scrollLeft = 0;
+    }
+
+    /* ================= フェーズ1：Gemini OCR =================
+       モデルは gemini-3.8-flash を既定とし、使えない場合は 3.7 → 3.6 → 3.5 →
+       3.5-flash-lite の順に自動で切り替える。generationConfig.temperature は
+       送らない（Gemini 3.6以降で非推奨となり400エラーの原因になりうるため）。
+       429（無料枠上限）・401/403（キー無効）・通信失敗は区別して表示する。
+       有料枠へ自動で切り替えることはしない。OCRが失敗しても原本画像には触れない。 */
+    var GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+    var OCR_PROMPT = [
+      'あなたは日本の法令学習用の文字起こし（OCR）を行います。添付画像は、地方自治法・地方公務員法の参考書や条文のページです。画像内の文章を、できるだけ正確にそのまま文字起こししてください。',
+      '守ること：',
+      '・条文番号（第○条、第○項など）、数字、期限（○日、○月、○年など）、割合・人数などの数値は、特に丁寧に読み取ってください。',
+      '・「原則」「例外」の区別や、ただし書きの構造が分かるように、原文の言い回しを変えずに書き写してください。',
+      '・表は、行と列の関係が分かる形でテキスト化してください（各行を改行し、項目間は「｜」で区切るなど）。',
+      '・判読できない文字や箇所は、推測で埋めず、その場所に「［判読不能］」と書いてください。一部だけ読める場合も、読めた部分だけを書き、読めない部分は「［判読不能］」としてください。',
+      '・出力は文字起こしした文章のみにしてください。解説、要約、見出しの追加、感想、注意書きは一切付けないでください。'
+    ].join('\n');
+    function ocrError(kind, message){
+      var e = new Error(message);
+      e.kind = kind;
+      return e;
+    }
+    function ocrPayload(img){
+      var supported = {'image/jpeg': 1, 'image/png': 1, 'image/webp': 1, 'image/gif': 1};
+      if (supported[img.mimeType]) return Promise.resolve({mimeType: img.mimeType, base64: img.dataBase64});
+      /* HEICなどGeminiが直接読めない形式は、ブラウザで表示できる場合に限りJPEGへ変換したコピーを送る（原本は変更しない） */
+      return new Promise(function(res, rej){
+        var im = new Image();
+        im.onload = function(){
+          try {
+            var w = im.naturalWidth, h = im.naturalHeight;
+            var scale = Math.min(1, 2000 / Math.max(w, h));
+            var cv = document.createElement('canvas');
+            cv.width = Math.max(1, Math.round(w * scale));
+            cv.height = Math.max(1, Math.round(h * scale));
+            cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
+            var du = cv.toDataURL('image/jpeg', 0.9);
+            res({mimeType: 'image/jpeg', base64: du.split(',')[1]});
+          } catch(e){ rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）をOCR用に変換できませんでした。')); }
+        };
+        im.onerror = function(){ rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）はOCRに対応していませんでした。JPEGやPNGの画像でお試しください。')); };
+        im.src = 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
+      });
+    }
+    function geminiOcr(img, apiKey){
+      return ocrPayload(img).then(function(payload){
+        var body = JSON.stringify({
+          contents: [{parts: [{text: OCR_PROMPT}, {inline_data: {mime_type: payload.mimeType, data: payload.base64}}]}]
+        });
+        function tryModel(i){
+          if (i >= GEMINI_MODELS.length){
+            throw ocrError('model', '利用できるGeminiモデルがありませんでした（すべてのモデルで失敗しました）。時間をおいて再試行してください。');
+          }
+          var model = GEMINI_MODELS[i];
+          var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
+          return fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
+            body: body
+          }).then(function(resp){
+            if (resp.status === 429) throw ocrError('quota', '無料枠の上限に達しました（エラー429）。時間を置くと回復します。このアプリが有料枠へ自動で切り替えることはありません。');
+            if (resp.status === 401 || resp.status === 403) throw ocrError('auth', 'APIキーが無効か、このキーでは利用できません（エラー' + resp.status + '）。設定画面でキーを確認してください。');
+            if (resp.status === 404) return tryModel(i + 1);
+            if (!resp.ok){
+              return resp.text().then(function(t){
+                if (resp.status === 400 && /model/i.test(t || '')) return tryModel(i + 1);
+                throw ocrError('api', 'Gemini APIでエラーが発生しました（エラー' + resp.status + '）。時間をおいて再試行してください。');
+              });
+            }
+            return resp.json().then(function(data){
+              var cand = data && data.candidates && data.candidates[0];
+              var parts = cand && cand.content && cand.content.parts;
+              var text = '';
+              if (parts) parts.forEach(function(p){ if (p && typeof p.text === 'string') text += p.text; });
+              text = text.trim();
+              if (!text) throw ocrError('api', 'AIから読み取り結果が返りませんでした。画像が鮮明でない場合は、撮り直して再試行してください。');
+              return {text: text, model: model};
+            });
+          }, function(){
+            throw ocrError('network', '通信に失敗しました。ネットワーク接続を確認して、再試行してください。');
+          });
+        }
+        return tryModel(0);
+      });
+    }
+    function rebuildItemBodyFromOcr(itemId){
+      return itemImageLinks(itemId).then(function(pages){
+        var texts = [];
+        pages.forEach(function(p){ if (p.img.ocrText && p.img.ocrText.trim()) texts.push(p.img.ocrText); });
+        if (!texts.length) return null;
+        return dbGet('items', itemId).then(function(item){
+          if (!item) return null;
+          item.body = texts.join('\n\n');
+          var prev = item.confirmation || {};
+          /* AIの読み取り結果を本文に反映した項目は、必ず「未確認」に戻す */
+          item.confirmation = {status: 'unconfirmed', source: prev.source || '', articleRef: prev.articleRef || '', effectiveDate: prev.effectiveDate || '', checkedAt: ''};
+          return saveRecord('items', item);
+        });
+      });
+    }
+    function refreshLinkedItems(imageId){
+      return dbAll('links').then(function(links){
+        var itemIds = {};
+        links.forEach(function(l){ if (l.type === 'item-image' && l.toId === imageId) itemIds[l.fromId] = 1; });
+        var chain = Promise.resolve();
+        Object.keys(itemIds).forEach(function(itemId){
+          chain = chain.then(function(){ return rebuildItemBodyFromOcr(itemId); });
+        });
+        return chain;
+      });
+    }
+    function openOcr(imageId){
+      if (!db){ toast('データベースが使えません'); return; }
+      dbGet('images', imageId).then(function(img){
+        if (!img){ toast('画像が見つかりませんでした'); return; }
+        var keyInfo = getStoredKey();
+        var html = '<h2>AI OCR（文字起こし）</h2>';
+        html += '<img class="ocrimg" src="' + imgSrc(img) + '" alt="OCR対象の原本画像">';
+        html += '<p style="margin:10px 0 4px">' + ocrBadge(img) +
+          (img.ocrModel ? ' <span class="tiny">使用モデル：' + esc(img.ocrModel) + '</span>' : '') +
+          (img.ocrAt ? ' <span class="tiny">実行日時：' + esc(fmtDateTime(img.ocrAt)) + '</span>' : '') + '</p>';
+        html += '<p class="small" style="margin:0 0 10px">' + esc(img.name || '') + '</p>';
+        if (img.ocrStatus === 'error' && img.ocrError) html += '<div class="dangerbox">' + esc(img.ocrError) + '</div>';
+        if (img.ocrStatus === 'running') html += '<div class="warnbox" style="margin:0 0 12px">前回のOCR実行が完了していない可能性があります。そのまま再実行できます。</div>';
+        if (!keyInfo){
+          html += '<div class="warnbox" style="margin:0 0 12px"><strong>Gemini APIキーが未設定です。</strong><br>OCRを使うには、設定画面であなたのAPIキーを登録してください。</div>';
+          html += '<button class="btn primary block" type="button" id="ocrGoSettings">設定画面を開く</button>';
+        }
+        html += '<div id="ocrMsg" style="margin-top:12px"></div>';
+        html += '<button class="btn primary block" type="button" id="ocrRunBtn" style="margin-top:4px"' + (keyInfo ? '' : ' disabled') + '>' + (img.ocrText ? 'OCRを再実行する' : 'OCRを実行する') + '</button>';
+        html += '<label class="flabel" for="ocrText">読み取り結果（修正できます）</label>';
+        html += '<textarea class="ocrtext" id="ocrText" placeholder="OCRを実行すると、ここに読み取り結果が入ります。手入力で書き起こすこともできます。">' + esc(img.ocrText || '') + '</textarea>';
+        html += '<p class="tiny">保存した読み取り結果は、関連付けられた参考書項目の本文に、ページ順で反映されます。AIの読み取り結果は必ず「未確認」として扱われ、「確認済み」にするには公式出典・条文・施行日の3点照合が必要です。OCRが失敗しても、保存済みの原本画像は削除されません。</p>';
+        html += '<button class="btn primary block" type="button" id="ocrSaveBtn">読み取り結果を保存する</button>';
+        html += '<button class="btn ghost block" type="button" id="ocrCloseBtn" style="margin-top:10px">閉じる</button>';
+        openSheet(html);
+        $('ocrCloseBtn').addEventListener('click', closeSheet);
+        var goBtn = $('ocrGoSettings');
+        if (goBtn) goBtn.addEventListener('click', function(){ closeSheet(); switchTab('settings'); });
+        $('ocrRunBtn').addEventListener('click', function(){
+          var cur = getStoredKey();
+          if (!cur){ toast('APIキーが未設定です'); return; }
+          var runBtn = $('ocrRunBtn');
+          var msg = $('ocrMsg');
+          runBtn.disabled = true;
+          runBtn.textContent = 'AIが読み取り中です…';
+          msg.innerHTML = '<div class="notice">Gemini APIへ画像を送信して読み取っています。モデルが使えない場合は自動で次のモデルを試します。</div>';
+          img.ocrStatus = 'running';
+          dbPut('images', img).catch(function(){});
+          geminiOcr(img, cur.key).then(function(result){
+            img.ocrStatus = 'done';
+            img.ocrText = result.text;
+            img.ocrModel = result.model;
+            img.ocrError = '';
+            img.ocrErrorKind = '';
+            img.ocrAt = nowIso();
+            return dbPut('images', img).then(function(){
+              var ta = $('ocrText');
+              if (ta) ta.value = result.text;
+              if (msg) msg.innerHTML = '<div class="okbox" style="margin:0">読み取りが完了しました（使用モデル：' + esc(result.model) + '）。内容を確認し、必要なら修正して「読み取り結果を保存する」を押してください。保存すると項目の本文へ反映されます。</div>';
+              if (runBtn){ runBtn.disabled = false; runBtn.textContent = 'OCRを再実行する'; }
+            });
+          }).catch(function(e){
+            img.ocrStatus = 'error';
+            img.ocrError = e && e.message ? e.message : 'OCRに失敗しました';
+            img.ocrErrorKind = e && e.kind ? e.kind : 'other';
+            img.ocrAt = nowIso();
+            dbPut('images', img).catch(function(){});
+            if (msg) msg.innerHTML = '<div class="dangerbox" style="margin:0"><strong>OCRに失敗しました。</strong><br>' + esc(img.ocrError) + '<br>保存済みの原本画像はそのまま残っています。下のボタンから再試行できます。</div>';
+            if (runBtn){ runBtn.disabled = false; runBtn.textContent = '再試行する'; }
+            renderUnlinked();
+          });
+        });
+        $('ocrSaveBtn').addEventListener('click', function(){
+          var text = $('ocrText').value;
+          img.ocrText = text;
+          if (text.trim() && img.ocrStatus !== 'done'){ img.ocrStatus = 'done'; }
+          if (!text.trim() && img.ocrStatus === 'done'){ img.ocrStatus = 'none'; img.ocrModel = ''; }
+          img.updatedAt = nowIso();
+          dbPut('images', img).then(function(){
+            return refreshLinkedItems(imageId);
+          }).then(function(){
+            toast('読み取り結果を保存しました（未確認）');
+            refreshAll(); renderItems(); renderUnlinked();
+            closeSheet();
+          }).catch(function(){ toast('保存に失敗しました'); });
+        });
+      });
+    }
 
     /* ================= 初期化 ================= */
     function bindEvents(){
@@ -1642,6 +2195,15 @@ renderItems();
       $('restoreFile').addEventListener('change', function(){ handleRestoreFile(this.files && this.files[0]); });
       $('deleteAllBtn').addEventListener('click', deleteAllData);
       $('runSafetyTestsBtn').addEventListener('click', runSafetyTests);
+      /* フェーズ1：取り込み・ビューア */
+      $('importPickBtn').addEventListener('click', function(){ $('importFiles').click(); });
+      $('importCameraBtn').addEventListener('click', function(){ $('importCamera').click(); });
+      $('importFiles').addEventListener('change', function(){ importFiles(this.files, {}); this.value = ''; });
+      $('importCamera').addEventListener('change', function(){ importFiles(this.files, {}); this.value = ''; });
+      $('itemAddFiles').addEventListener('change', function(){ importFiles(this.files, {linkItemId: addTargetItemId}); this.value = ''; });
+      $('itemAddCamera').addEventListener('change', function(){ importFiles(this.files, {linkItemId: addTargetItemId}); this.value = ''; });
+      $('viewerCloseBtn').addEventListener('click', closeViewer);
+      $('viewerFitBtn').addEventListener('click', toggleViewerFit);
     }
     function init(){
       bindEvents();
