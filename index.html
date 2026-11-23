@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" href="data:," />
+    <title>法令マスター</title>
+    <style>
+      :root{
+        --bg:#0b0d11; --bg2:#10131a; --surface:#151923; --surface2:#1b202e; --surface3:#222839;
+        --border:#272e40; --border-soft:#202635;
+        --text:#ece9e1; --muted:#9aa3b2; --faint:#6d7585;
+        --gold:#c9a45c; --gold-strong:#dcbc77; --gold-dim:rgba(201,164,92,.14);
+        --ok:#7fb685; --ok-dim:rgba(127,182,133,.13);
+        --warn:#d9a441; --warn-dim:rgba(217,164,65,.12);
+        --danger:#e0705f; --danger-dim:rgba(224,112,95,.12);
+        --radius:14px;
+      }
+      *{box-sizing:border-box;}
+      html{-webkit-text-size-adjust:100%;}
+      body{
+        margin:0; background:var(--bg); color:var(--text);
+        font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+        font-size:16px; line-height:1.65; letter-spacing:.01em;
+      }
+      button,[role="button"],select,summary,input:not([type="checkbox"],[type="radio"]){min-height:44px;}
+      button{font:inherit; cursor:pointer;}
+      input,select,textarea{font:inherit;}
+      a{color:var(--gold-strong);}
+      .app{max-width:680px; margin:0 auto; padding:14px 16px 118px;}
+      /* top status strip */
+      .topstrip{display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:2px 0 12px;}
+      .chip{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--gold-strong);
+        background:var(--gold-dim); border:1px solid rgba(201,164,92,.35); border-radius:999px; padding:4px 10px; min-height:28px;}
+      .chip.gray{color:var(--muted); background:var(--surface2); border-color:var(--border);}
+      .dot{width:8px; height:8px; border-radius:50%; background:var(--faint); flex:none;}
+      .dot.on{background:var(--ok);} .dot.off{background:var(--danger);}
+      .topstrip .spacer{flex:1;}
+      .saved-at{font-size:12px; color:var(--faint);}
+      /* headings */
+      h1{font-size:22px; line-height:1.35; margin:6px 0 4px; font-weight:700;}
+      h2{font-size:17px; margin:0 0 8px; font-weight:700;}
+      h3{font-size:15px; margin:18px 0 6px; font-weight:700;}
+      .lead{color:var(--muted); font-size:14px; margin:0 0 14px;}
+      .small{font-size:13px; color:var(--muted);}
+      .tiny{font-size:12px; color:var(--faint);}
+      /* cards */
+      .card{background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:16px; margin:0 0 12px;}
+      .card.flush{padding:0; overflow:hidden;}
+      .hero-num{font-size:44px; font-weight:800; line-height:1.1; color:var(--text);}
+      .hero-num .unit{font-size:16px; font-weight:600; color:var(--muted); margin-left:4px;}
+      .gold{color:var(--gold-strong);}
+      /* count grid */
+      .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+      .grid .cell{background:var(--surface2); border:1px solid var(--border-soft); border-radius:12px; padding:12px 14px;}
+      .cell .n{font-size:24px; font-weight:700; line-height:1.2;}
+      .cell .l{font-size:12px; color:var(--muted);}
+      /* list rows */
+      .row{display:flex; align-items:center; gap:12px; width:100%; text-align:left; background:transparent; border:0; border-bottom:1px solid var(--border-soft);
+        padding:14px 16px; color:var(--text); min-height:56px;}
+      .row:last-child{border-bottom:0;}
+      .row .grow{flex:1; min-width:0;}
+      .row .ttl{font-weight:600; font-size:15px; line-height:1.45;}
+      .row .sub{font-size:12px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis;}
+      .chev{color:var(--faint); flex:none; font-size:18px;}
+      /* badges */
+      .badge{display:inline-flex; align-items:center; font-size:11px; font-weight:700; border-radius:999px; padding:2px 8px; line-height:1.6; white-space:nowrap;}
+      .badge.unconfirmed{color:var(--warn); background:var(--warn-dim); border:1px solid rgba(217,164,65,.4);}
+      .badge.confirmed{color:var(--ok); background:var(--ok-dim); border:1px solid rgba(127,182,133,.4);}
+      .badge.sample{color:var(--muted); background:var(--surface3); border:1px solid var(--border);}
+      .badge.phase{color:var(--gold-strong); background:var(--gold-dim); border:1px solid rgba(201,164,92,.35);}
+      /* buttons */
+      .btn{display:inline-flex; align-items:center; justify-content:center; gap:8px; border-radius:12px; padding:10px 16px;
+        font-weight:700; font-size:15px; border:1px solid transparent; min-height:48px; text-decoration:none;}
+      .btn.primary{background:var(--gold); color:#191407;}
+      .btn.primary:active{background:var(--gold-strong);}
+      .btn.ghost{background:var(--surface2); color:var(--text); border-color:var(--border);}
+      .btn.danger{background:transparent; color:var(--danger); border-color:rgba(224,112,95,.5);}
+      .btn.block{width:100%;}
+      .btn:disabled{opacity:.45; cursor:default;}
+      .btn.sm{min-height:40px; padding:6px 12px; font-size:13px; border-radius:10px;}
+      .stack{display:flex; flex-direction:column; gap:10px;}
+      .hstack{display:flex; gap:10px; flex-wrap:wrap;}
+      .hstack .btn{flex:1;}
+      /* notices */
+      .notice{border:1px dashed var(--border); border-radius:var(--radius); padding:16px; color:var(--muted); font-size:14px; background:var(--bg2);}
+      .notice strong{color:var(--text);}
+      .warnbox{border:1px solid rgba(217,164,65,.45); background:var(--warn-dim); border-radius:var(--radius); padding:14px 16px; font-size:14px; margin:0 0 12px;}
+      .warnbox strong{color:var(--warn);}
+      .dangerbox{border:1px solid rgba(224,112,95,.45); background:var(--danger-dim); border-radius:var(--radius); padding:14px 16px; font-size:14px; margin:0 0 12px;}
+      .okbox{border:1px solid rgba(127,182,133,.4); background:var(--ok-dim); border-radius:var(--radius); padding:14px 16px; font-size:14px; margin:0 0 12px;}
+      .empty{padding:28px 16px; text-align:center; color:var(--muted); font-size:14px;}
+      /* forms */
+      label.flabel{display:block; font-size:13px; font-weight:700; color:var(--muted); margin:14px 0 6px;}
+      input[type="text"],input[type="password"],input[type="file"],select,textarea{
+        width:100%; background:var(--bg2); border:1px solid var(--border); border-radius:12px; color:var(--text); padding:10px 12px;}
+      input[type="file"]{padding:10px;}
+      .checkline{display:flex; align-items:flex-start; gap:10px; padding:12px; background:var(--surface2); border:1px solid var(--border-soft); border-radius:12px; min-height:48px; cursor:pointer;}
+      .checkline input[type="checkbox"]{width:22px; height:22px; margin:2px 0 0; flex:none; accent-color:var(--gold);}
+      .checkline .t{font-size:14px; font-weight:600;}
+      .checkline .d{font-size:12px; color:var(--muted); font-weight:400;}
+      .keystat{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; letter-spacing:.08em;}
+      /* definition list */
+      dl.kv{margin:0; display:grid; grid-template-columns:96px 1fr; gap:6px 12px; font-size:13px;}
+      dl.kv dt{color:var(--faint);}
+      dl.kv dd{margin:0; word-break:break-all;}
+      .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;}
+      ul.tight{margin:6px 0; padding-left:20px;}
+      ul.tight li{margin:3px 0; font-size:14px;}
+      ol.tight{margin:6px 0; padding-left:20px;}
+      ol.tight li{margin:3px 0; font-size:14px;}
+      .logbox{background:var(--bg2); border:1px solid var(--border-soft); border-radius:12px; padding:10px 12px; max-height:220px; overflow:auto;}
+      .logbox .entry{font-size:12px; color:var(--muted); padding:6px 0; border-bottom:1px solid var(--border-soft);}
+      .logbox .entry:last-child{border-bottom:0;}
+      .logbox .entry .when{color:var(--faint);}
+      /* views */
+      .view{display:none;}
+      .view.active{display:block;}
+      /* bottom nav */
+      .tabbar{position:fixed; left:0; right:0; bottom:0; z-index:40; background:rgba(13,15,20,.96); border-top:1px solid var(--border-soft);
+        padding-bottom:env(safe-area-inset-bottom);}
+      .tabbar .inner{max-width:680px; margin:0 auto; display:flex;}
+      .tabbtn{flex:1; background:transparent; border:0; color:var(--faint); padding:8px 2px 10px; display:flex; flex-direction:column; align-items:center; gap:3px; min-height:60px;}
+      .tabbtn svg{width:23px; height:23px;}
+      .tabbtn .lb{font-size:11px; font-weight:600; line-height:1.2; text-align:center;}
+      .tabbtn.active{color:var(--gold-strong);}
+      /* sheet & modal */
+      .overlay{position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.62); display:none;}
+      .overlay.open{display:block;}
+      .sheet{position:absolute; left:0; right:0; bottom:0; max-height:88vh; overflow:auto; background:var(--surface); border-radius:20px 20px 0 0;
+        border-top:1px solid var(--border); padding:18px 18px calc(20px + env(safe-area-inset-bottom)); max-width:680px; margin:0 auto;}
+      .sheet h2{padding-right:44px;}
+      .sheet .closebtn{position:absolute; top:12px; right:12px; width:44px; height:44px; border-radius:50%; border:1px solid var(--border);
+        background:var(--surface2); color:var(--text); font-size:18px; line-height:1;}
+      .modalwrap{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding:20px;}
+      .modalcard{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:20px; width:100%; max-width:520px; max-height:86vh; overflow:auto; position:relative;}
+      .modalcard .closebtn{position:absolute; top:10px; right:10px; width:44px; height:44px; border-radius:50%; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:18px; line-height:1; z-index:2;}
+      /* toast */
+      #toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(84px + env(safe-area-inset-bottom)); z-index:80;
+        background:var(--surface3); color:var(--text); border:1px solid var(--border); border-radius:999px; padding:10px 18px;
+        font-size:14px; font-weight:600; display:none; max-width:92vw; text-align:center; box-shadow:0 8px 28px rgba(0,0,0,.5);}
+      #toast.show{display:block;}
+      .divider{height:1px; background:var(--border-soft); margin:16px 0;}
+      .progressbar{height:8px; background:var(--surface3); border-radius:99px; overflow:hidden;}
+      .progressbar > div{height:100%; background:var(--gold);}
+      @media (min-width:560px){ .grid{grid-template-columns:repeat(3,1fr);} }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <div class="topstrip">
+        <span class="chip">フェーズ0 ・ 基盤</span>
+        <span class="chip gray"><span class="dot" id="dbDot"></span><span id="dbStatus">保存先を確認中…</span></span>
+        <span class="spacer"></span>
+        <span class="saved-at" id="savedAt"></span>
+      </div>
+
+      <div id="idbError" class="dangerbox" style="display:none">
+        <strong>このブラウザではIndexedDBが使えません。</strong><br>
+        データの保存・バックアップ・復元は動作しません。Safariのプライベートブラウズを終了するか、設定でWebサイトデータが許可されているか確認してください。この表示は不具合を隠さずお知らせするためのものです。
+      </div>
+
+      <!-- ============ ホーム ============ -->
+      <section class="view" id="view-home">
+        <h1>今日の学習</h1>
+        <p class="lead">地方自治法・地方公務員法の学習基盤です。フェーズ0では保存・バックアップなどの土台を実装しています。</p>
+
+        <div class="card">
+          <h2>今日の復習</h2>
+          <div class="hero-num"><span id="reviewCount">–</span><span class="unit">件</span></div>
+          <p class="small" style="margin:6px 0 0">学習履歴に記録された「次回復習日」が今日以前の件数を、データベースから実際に数えています。復習スケジュール自体はフェーズ5で実装します。</p>
+        </div>
+
+        <div class="card" id="resumeCard" style="display:none">
+          <h2>続きから再開</h2>
+          <p class="small" id="resumeText" style="margin:0 0 12px"></p>
+          <button class="btn primary block" id="resumeBtn" type="button">続きを開く</button>
+        </div>
+
+        <div class="card">
+          <h2>保存されているデータ</h2>
+          <div class="grid" id="homeCounts"></div>
+          <div class="divider"></div>
+          <dl class="kv">
+            <dt>保存状態</dt><dd id="homeSaveState">確認中…</dd>
+            <dt>使用容量の目安</dt><dd id="homeStorage">確認中…</dd>
+            <dt>データ構造の版</dt><dd id="homeSchema">確認中…</dd>
+          </dl>
+        </div>
+
+        <div class="notice">
+          <strong>フェーズ0の範囲について</strong><br>
+          この画面と下部タブの構成、IndexedDB保存、安定ID、データ構造の版管理と移行、完全バックアップ／復元、Gemini APIキーの設定と送信先の説明がフェーズ0の実装範囲です。写真取り込み・OCR・問題演習・期限計算・赤ペンなどはフェーズ1以降で実装するため、ここには置いていません。
+        </div>
+      </section>
+
+      <!-- ============ 参考書 ============ -->
+      <section class="view" id="view-reference">
+        <h1>参考書</h1>
+        <p class="lead">保存されている参考書項目の一覧です（IndexedDBの items ストアから実際に読み込んでいます）。</p>
+        <div class="card flush" id="itemList"></div>
+        <div class="notice">
+          写真の取り込み・OCR・項目の統合や編集はフェーズ1〜2で実装します。いまは保存と表示の確認ができます。動作確認用の項目は「設定」→「データ管理」から作成できます。
+        </div>
+      </section>
+
+      <!-- ============ 問題 ============ -->
+      <section class="view" id="view-questions">
+        <h1>問題</h1>
+        <p class="lead">問題データの保存状況です。</p>
+        <div class="card">
+          <div class="grid">
+            <div class="cell"><div class="n js-count" data-store="questions">–</div><div class="l">保存されている問題</div></div>
+            <div class="cell"><div class="n js-count" data-store="histories">–</div><div class="l">学習履歴（解答記録）</div></div>
+          </div>
+        </div>
+        <div id="questionList"></div>
+        <div class="notice">
+          <strong>問題演習は未実装です（フェーズ5で実装予定）。</strong><br>
+          出題・解答・採点の機能はまだありません。ダミーの問題演習は作っていないため、この画面では保存件数の確認と、保存済み問題のタイトル確認だけができます。第10版仕様の「解答時間の記録」は、演習機能とあわせてフェーズ5で実装します。
+        </div>
+      </section>
+
+      <!-- ============ 辞典・計算 ============ -->
+      <section class="view" id="view-dict">
+        <h1>辞典・計算</h1>
+        <p class="lead">数字・期限データの保存状況です。</p>
+        <div class="card">
+          <div class="grid">
+            <div class="cell"><div class="n js-count" data-store="numbers">–</div><div class="l">数字・期限の登録</div></div>
+            <div class="cell"><div class="n js-count" data-store="links">–</div><div class="l">関連付け（リンク）</div></div>
+          </div>
+        </div>
+        <div id="numberList"></div>
+        <div class="notice">
+          <strong>数字・期限辞典の詳細表示と期限計算エンジンは未実装です（フェーズ4で実装予定）。</strong><br>
+          期限計算は、法律上の計算ルール（法令・条文・施行日・確認状態を記録したデータ）と、日付計算だけを行うJavaScriptエンジンを分離して実装します。AIの推測だけで法定期限を確定することはしません。いまは保存件数の確認だけができます。
+        </div>
+      </section>
+
+      <!-- ============ 設定 ============ -->
+      <section class="view" id="view-settings">
+        <h1>設定</h1>
+        <p class="lead">APIキー、データのバックアップと復元、データ構造の状態を管理します。</p>
+
+        <div class="card">
+          <h2>Gemini APIキー</h2>
+          <p class="small">AI機能（フェーズ1以降のOCRや問題生成など）で使う、あなた自身のGemini APIキーを登録します。キーはこの端末のブラウザ内にのみ保存され、このアプリの公開ファイルには含まれません。</p>
+          <div id="keyStatus"></div>
+          <label class="flabel" for="apiKeyInput">APIキー</label>
+          <input type="password" id="apiKeyInput" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza… で始まるキー">
+          <label class="checkline" style="margin-top:12px">
+            <input type="checkbox" id="sessionOnly">
+            <span><span class="t">このセッションだけ保持する</span><br>
+            <span class="d">キーをセッション保存（sessionStorage）に切り替えます。タブ／アプリを閉じると消え、次回は入力し直しが必要です。通常の保存先は localStorage（この端末に残ります）です。</span></span>
+          </label>
+          <div class="hstack" style="margin-top:12px">
+            <button class="btn primary" id="saveKeyBtn" type="button">キーを保存</button>
+            <button class="btn danger" id="deleteKeyBtn" type="button">キーを削除</button>
+          </div>
+          <div class="divider"></div>
+          <div class="warnbox" style="margin:0">
+            <strong>費用についての注意（必ずお読みください）</strong><br>
+            Gemini APIには無料枠がありますが、<strong>課金設定（請求先アカウント）が有効なGoogle Cloudプロジェクトに紐づくAPIキーを使うと、無料枠の範囲や条件によっては費用が発生する可能性があります。</strong>費用を避けるため、課金設定のないプロジェクトで発行した「無料専用」のキーを、このアプリ専用に分けて使うことを推奨します。利用状況と課金の有無は、Google Cloudコンソールの請求レポートで必ずご自身で確認してください。
+          </div>
+          <h3>APIキーを制限する方法（推奨）</h3>
+          <ol class="tight">
+            <li>Google Cloudコンソール（またはGoogle AI StudioのAPIキー管理画面）を開き、このアプリ用に使う対象のキーを選びます。</li>
+            <li>「APIの制限」で「キーを制限」を選び、許可するAPIを <strong>Generative Language API</strong> のみ（Gemini API）に絞ります。これにより、キーが漏れても他のGoogle APIには使えません。</li>
+            <li>同じ画面やクォータ画面で、使用量の上限（クォータ）と現在の使用量を確認できるようにしておきます。無料枠の上限に達するとAPIは一時的に使えなくなります（エラー429など）。時間を置くと回復します。</li>
+            <li>キーは他人と共有せず、漏れた疑いがある場合は古いキーを削除して新しいキーを発行し直してください。</li>
+          </ol>
+          <p class="small">このアプリは外部スクリプトを読み込まず、保存した文章などをHTMLとして実行しない作りにして、キーが漏れる経路を減らしています。ただしブラウザ内だけで動く構成のため、キーをサーバー側で隠す方式は使えず、リスクをゼロにはできません。</p>
+          <div class="divider"></div>
+          <button class="btn ghost block" id="openSendInfoBtn" type="button">AIを使うときに何がどこへ送られるか（送信先の説明）</button>
+        </div>
+
+        <div class="card">
+          <h2>データ管理</h2>
+          <dl class="kv">
+            <dt>保存容量の目安</dt><dd id="settingsStorage">確認中…</dd>
+            <dt>データ構造の版</dt><dd id="settingsSchema">確認中…</dd>
+          </dl>
+          <div class="grid" id="settingsCounts" style="margin-top:12px"></div>
+
+          <h3>動作確認用サンプルデータ</h3>
+          <p class="small">フェーズ0の保存・再読み込み・バックアップ・復元を確認するためのサンプルです。参考書項目・数字・問題に安定ID付きで保存され、確認状態はすべて「未確認」です（公式情報との照合をしていないため、確認済みにはしていません）。</p>
+          <button class="btn ghost block" id="createSampleBtn" type="button">確認用サンプルデータを作成</button>
+
+          <h3>完全バックアップ</h3>
+          <p class="small">全ストアのデータと関連付けを manifest.json にまとめ、原本画像を images/ フォルダに入れたZIPファイルを作成します（圧縮なしのストア形式で、このページ内のコードが生成します）。<strong>Gemini APIキーはバックアップに絶対に含まれません。</strong></p>
+          <button class="btn primary block" id="backupBtn" type="button">完全バックアップを作成してダウンロード</button>
+
+          <h3>復元</h3>
+          <p class="small">バックアップのZIPを選ぶと、まず内容のプレビュー（書き出し日時・データ構造の版・件数）を表示します。復元は、あなたが確認ボタンを押した場合のみ実行されます。IDはバックアップ時のものをそのまま保持します。</p>
+          <label class="flabel" for="restoreFile">バックアップファイル（ZIP）</label>
+          <input type="file" id="restoreFile" accept=".zip,application/zip">
+          <div id="restorePreview" style="margin-top:12px"></div>
+
+          <h3>全データ削除</h3>
+          <p class="small">IndexedDB内のすべての学習データを削除します。削除前にバックアップの作成を強く推奨します。APIキーはこの操作では削除されません（上の「キーを削除」から別途削除できます）。</p>
+          <button class="btn danger block" id="deleteAllBtn" type="button">全データを削除…</button>
+        </div>
+
+        <div class="card">
+          <h2>データ構造と移行ログ</h2>
+          <p class="small">データ構造の版（SCHEMA_VERSION）は <span class="mono" id="schemaVersionText">1</span> です。起動のたびに移行チェックを行い、結果をここに記録します。将来の版で構造が変わる場合は、既存データを消さずに移行する枠組みを通します。</p>
+          <div class="logbox" id="migrationLog"><div class="entry">読み込み中…</div></div>
+        </div>
+
+        <div class="card">
+          <h2>法令情報の「確認済み」について</h2>
+          <p class="small">このアプリでは、法令に関する記録を「確認済み」にできるのは、<strong>公式情報の出典・条文・施行日の3点を照合した場合のみ</strong>です。プログラム上も、出典・条文・施行日のいずれかが空の記録は「確認済み」にできないよう検証しています。それ以外はすべて「未確認」として扱い、AIの推測を確認済みの事実として登録することはありません。</p>
+          <h3>暗記カードの両面印刷について（フェーズ8で実装予定）</h3>
+          <p class="small">両面印刷の裏面の反転方向は決め打ちしません。長辺綴じ／短辺綴じを設定で切り替えられるようにし、位置合わせ用のテスト印刷で実際に確認して、合った設定を保存できる設計にします。印刷機能自体はフェーズ8で実装します。</p>
+          <h3>削除・維持が決まっている機能</h3>
+          <ul class="tight">
+            <li>音声読み上げ（第3版）：削除済みのため実装しません。</li>
+            <li>A4一枚要点まとめ（第9版）：削除済みのため実装しません。</li>
+            <li>解答時間の記録（第10版）：維持します。問題演習とあわせてフェーズ5で実装します。</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <!-- bottom tab bar -->
+    <nav class="tabbar" aria-label="メインタブ">
+      <div class="inner">
+        <button class="tabbtn" type="button" data-tab="home">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M9.5 21v-6h5v6"/></svg>
+          <span class="lb">ホーム</span>
+        </button>
+        <button class="tabbtn" type="button" data-tab="reference">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
+          <span class="lb">参考書</span>
+        </button>
+        <button class="tabbtn" type="button" data-tab="questions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.3A2.6 2.6 0 1 1 12 12.4c-.8.3-1 .8-1 1.6"/><circle cx="11" cy="17.4" r="0.4" fill="currentColor"/></svg>
+          <span class="lb">問題</span>
+        </button>
+        <button class="tabbtn" type="button" data-tab="dict">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7.5h8M8 12h.01M12 12h.01M16 12h.01M8 15.5h.01M12 15.5h.01M16 15.5h.01"/></svg>
+          <span class="lb">辞典・計算</span>
+        </button>
+        <button class="tabbtn" type="button" data-tab="settings">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.14-1.4l2-1.55-2-3.46-2.36.95A7 7 0 0 0 14.1 5.1L13.7 2.6h-3.4l-.4 2.5a7 7 0 0 0-2.4 1.44l-2.36-.95-2 3.46 2 1.55a7 7 0 0 0 0 2.8l-2 1.55 2 3.46 2.36-.95a7 7 0 0 0 2.4 1.44l.4 2.5h3.4l.4-2.5a7 7 0 0 0 2.4-1.44l2.36.95 2-3.46-2-1.55c.1-.45.14-.92.14-1.4z"/></svg>
+          <span class="lb">設定</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- sheet (item detail) -->
+    <div class="overlay" id="sheetOverlay">
+      <div class="sheet" role="dialog" aria-modal="true">
+        <button class="closebtn" type="button" id="sheetClose" aria-label="閉じる">×</button>
+        <div id="sheetBody"></div>
+      </div>
+    </div>
+
+    <!-- modal -->
+    <div class="overlay" id="modalOverlay">
+      <div class="modalwrap">
+        <div class="modalcard" role="dialog" aria-modal="true">
+          <div id="modalBody"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" role="status"></div>
+
+    <script>
+    'use strict';
+    /* ================= 基本ユーティリティ ================= */
+    var SCHEMA_VERSION = 1;
+    var DB_NAME = 'horei-master-db';
+    var DB_VERSION = 1;
+    var STORES = ['meta','items','images','numbers','questions','histories','annotations','links','settingsData'];
+    var STORE_LABELS = {meta:'メタ情報', items:'参考書項目', images:'原本画像', numbers:'数字・期限', questions:'問題', histories:'学習履歴', annotations:'赤ペン・付箋', links:'関連付け', settingsData:'設定データ'};
+    var LAW_STORES = {items:1, numbers:1, questions:1};
+
+    function $(id){ return document.getElementById(id); }
+    function esc(s){
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+      });
+    }
+    function uuid(){
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      var b = new Uint8Array(16);
+      if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(b); else for (var i=0;i<16;i++) b[i]=Math.floor(Math.random()*256);
+      b[6]=(b[6]&0x0f)|0x40; b[8]=(b[8]&0x3f)|0x80;
+      var h=function(x){return ('0'+x.toString(16)).slice(-2);};
+      return [h(b[0])+h(b[1])+h(b[2])+h(b[3]), h(b[4])+h(b[5]), h(b[6])+h(b[7]), h(b[8])+h(b[9]), h(b[10])+h(b[11])+h(b[12])+h(b[13])+h(b[14])+h(b[15])].join('-');
+    }
+    function genId(prefix){ return prefix + '_' + uuid(); }
+    function nowIso(){ return new Date().toISOString(); }
+    function fmtDateTime(iso){
+      if(!iso) return '—';
+      var d = new Date(iso); if (isNaN(d.getTime())) return String(iso);
+      var p=function(n){return ('0'+n).slice(-2);};
+      return d.getFullYear()+'/'+p(d.getMonth()+1)+'/'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes());
+    }
+    function fmtDate(iso){
+      if(!iso) return '—';
+      var d = new Date(iso); if (isNaN(d.getTime())) return String(iso);
+      var p=function(n){return ('0'+n).slice(-2);};
+      return d.getFullYear()+'/'+p(d.getMonth()+1)+'/'+p(d.getDate());
+    }
+    var toastTimer = null;
+    function toast(msg){
+      var t = $('toast'); t.textContent = msg; t.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function(){ t.classList.remove('show'); }, 3200);
+    }
+
+    /* ================= 確認状態の検証 =================
+       「確認済み」は、公式情報の出典・条文・施行日の3点が揃った場合のみ。
+       1つでも空なら、コード上 confirmed にはできない。 */
+    function canConfirm(c){
+      return !!(c && String(c.source||'').trim() && String(c.articleRef||'').trim() && String(c.effectiveDate||'').trim());
+    }
+    function normalizeConfirmation(c){
+      c = c || {};
+      var ok = (c.status === 'confirmed') && canConfirm(c);
+      return {
+        status: ok ? 'confirmed' : 'unconfirmed',
+        source: c.source || '',
+        articleRef: c.articleRef || '',
+        effectiveDate: c.effectiveDate || '',
+        checkedAt: ok ? (c.checkedAt || nowIso()) : ''
+      };
+    }
+    function confirmationBadge(c){
+      if (c && c.status === 'confirmed' && canConfirm(c)) return '<span class="badge confirmed">確認済み</span>';
+      return '<span class="badge unconfirmed">未確認</span>';
+    }
+    function confirmationDetailHtml(c){
+      c = normalizeConfirmation(c);
+      var rows = '';
+      rows += '<dt>確認状態</dt><dd>' + (c.status==='confirmed' ? '確認済み' : '未確認') + '</dd>';
+      rows += '<dt>出典</dt><dd>' + (c.source ? esc(c.source) : '（未登録）') + '</dd>';
+      rows += '<dt>条文</dt><dd>' + (c.articleRef ? esc(c.articleRef) : '（未登録）') + '</dd>';
+      rows += '<dt>施行日</dt><dd>' + (c.effectiveDate ? esc(c.effectiveDate) : '（未登録）') + '</dd>';
+      rows += '<dt>確認日</dt><dd>' + (c.checkedAt ? fmtDate(c.checkedAt) : '—') + '</dd>';
+      return '<dl class="kv">' + rows + '</dl>' +
+        (c.status!=='confirmed' ? '<p class="tiny" style="margin-top:8px">出典・条文・施行日の3点を公式情報と照合した場合にのみ「確認済み」になります。</p>' : '');
+    }
+
+    /* ================= CRC32 / ZIP（ストア形式・自前実装） ================= */
+    var CRC_TABLE = (function(){
+      var t = [];
+      for (var n=0;n<256;n++){ var c=n; for (var k=0;k<8;k++){ c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); } t[n]=c>>>0; }
+      return t;
+    })();
+    function crc32(u8){
+      var c = 0xFFFFFFFF;
+      for (var i=0;i<u8.length;i++) c = CRC_TABLE[(c ^ u8[i]) & 0xFF] ^ (c>>>8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    }
+    function dosDateTime(d){
+      var time = ((d.getHours()<<11) | (d.getMinutes()<<5) | (d.getSeconds()>>1)) & 0xFFFF;
+      var yr = Math.max(0, d.getFullYear()-1980);
+      var date = ((yr<<9) | ((d.getMonth()+1)<<5) | d.getDate()) & 0xFFFF;
+      return {time:time, date:date};
+    }
+    function zipBuild(files){
+      var enc = new TextEncoder();
+      var chunks = []; var central = []; var offset = 0;
+      function u16(v){ return [v&0xFF, (v>>>8)&0xFF]; }
+      function u32(v){ return [v&0xFF, (v>>>8)&0xFF, (v>>>16)&0xFF, (v>>>24)&0xFF]; }
+      var dt = dosDateTime(new Date());
+      files.forEach(function(f){
+        var nameU = enc.encode(f.name);
+        var data = f.data || new Uint8Array(0);
+        var crc = crc32(data);
+        var localOffset = offset;
+        var lh = new Uint8Array([].concat(u32(0x04034b50), u16(20), u16(0x0800), u16(0), u16(dt.time), u16(dt.date),
+          u32(crc), u32(data.length), u32(data.length), u16(nameU.length), u16(0)));
+        chunks.push(lh); offset += lh.length;
+        chunks.push(nameU); offset += nameU.length;
+        chunks.push(data); offset += data.length;
+        var isDir = f.name.slice(-1) === '/';
+        var ch = new Uint8Array([].concat(u32(0x02014b50), u16(20), u16(20), u16(0x0800), u16(0), u16(dt.time), u16(dt.date),
+          u32(crc), u32(data.length), u32(data.length), u16(nameU.length), u16(0), u16(0), u16(0), u16(0),
+          u32(isDir ? 0x10 : 0), u32(localOffset)));
+        central.push({header: ch, name: nameU});
+      });
+      var cdStart = offset;
+      central.forEach(function(c){ chunks.push(c.header); offset += c.header.length; chunks.push(c.name); offset += c.name.length; });
+      var cdSize = offset - cdStart;
+      var eocd = new Uint8Array([].concat(u32(0x06054b50), u16(0), u16(0), u16(central.length), u16(central.length), u32(cdSize), u32(cdStart), u16(0)));
+      chunks.push(eocd);
+      return new Blob(chunks, {type:'application/zip'});
+    }
+    function inflateRaw(u8){
+      return new Promise(function(res, rej){
+        if (typeof DecompressionStream === 'undefined'){ rej(new Error('このブラウザでは圧縮形式のZIPを展開できません')); return; }
+        var ds = new DecompressionStream('deflate-raw');
+        var stream = new Blob([u8]).stream().pipeThrough(ds);
+        new Response(stream).arrayBuffer().then(function(ab){ res(new Uint8Array(ab)); }, rej);
+      });
+    }
+    function zipParse(buf){
+      var dv = new DataView(buf);
+      var u8 = new Uint8Array(buf);
+      var eocd = -1;
+      var min = Math.max(0, buf.byteLength - 22 - 66000);
+      for (var i = buf.byteLength - 22; i >= min; i--){
+        if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+      }
+      if (eocd < 0) return Promise.reject(new Error('ZIPファイルの終端レコードが見つかりませんでした。正しいバックアップファイルか確認してください。'));
+      var count = dv.getUint16(eocd + 10, true);
+      var cdOff = dv.getUint32(eocd + 16, true);
+      var dec = new TextDecoder();
+      var files = {};
+      var p = cdOff;
+      var chain = Promise.resolve();
+      var entries = [];
+      for (var n=0;n<count;n++){
+        if (p + 46 > buf.byteLength || dv.getUint32(p, true) !== 0x02014b50){
+          return Promise.reject(new Error('ZIPファイルの中央ディレクトリが壊れています。'));
+        }
+        entries.push({
+          method: dv.getUint16(p + 10, true),
+          compSize: dv.getUint32(p + 20, true),
+          nl: dv.getUint16(p + 28, true), el: dv.getUint16(p + 30, true), cl: dv.getUint16(p + 32, true),
+          lo: dv.getUint32(p + 42, true)
+        });
+        entries[entries.length-1].name = dec.decode(u8.subarray(p + 46, p + 46 + entries[entries.length-1].nl));
+        p += 46 + entries[entries.length-1].nl + entries[entries.length-1].el + entries[entries.length-1].cl;
+      }
+      entries.forEach(function(e){
+        chain = chain.then(function(){
+          var lnl = dv.getUint16(e.lo + 26, true), lel = dv.getUint16(e.lo + 28, true);
+          var start = e.lo + 30 + lnl + lel;
+          var comp = u8.subarray(start, start + e.compSize);
+          if (e.method === 0){ files[e.name] = comp.slice(); return null; }
+          if (e.method === 8){ return inflateRaw(comp).then(function(out){ files[e.name] = out; }); }
+          throw new Error('未対応の圧縮形式のファイルが含まれています: ' + e.name);
+        });
+      });
+      return chain.then(function(){ return files; });
+    }
+    function sha256Hex(u8){
+      if (window.crypto && crypto.subtle && crypto.subtle.digest){
+        return crypto.subtle.digest('SHA-256', u8).then(function(h){
+          return Array.prototype.map.call(new Uint8Array(h), function(b){ return ('0'+b.toString(16)).slice(-2); }).join('');
+        }).catch(function(){ return 'crc32:' + crc32(u8).toString(16); });
+      }
+      return Promise.resolve('crc32:' + crc32(u8).toString(16));
+    }
+    function u8ToB64(u8){
+      var s = '';
+      for (var i=0;i<u8.length;i+=0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i+0x8000));
+      return btoa(s);
+    }
+    function b64ToU8(b64){
+      var s = atob(b64); var u = new Uint8Array(s.length);
+      for (var i=0;i<s.length;i++) u[i] = s.charCodeAt(i);
+      return u;
+    }
+    function extForMime(mime){
+      if (mime === 'image/png') return 'png';
+      if (mime === 'image/webp') return 'webp';
+      if (mime === 'image/gif') return 'gif';
+      return 'jpg';
+    }
+
+    /* ================= IndexedDB ================= */
+    var db = null;
+    var idbAvailable = ('indexedDB' in window);
+    function openDB(){
+      return new Promise(function(res, rej){
+        if (!idbAvailable){ rej(new Error('IndexedDBが使えません')); return; }
+        var req;
+        try { req = indexedDB.open(DB_NAME, DB_VERSION); }
+        catch(e){ rej(e); return; }
+        req.onupgradeneeded = function(ev){
+          var d = ev.target.result;
+          STORES.forEach(function(s){ if (!d.objectStoreNames.contains(s)) d.createObjectStore(s, {keyPath:'id'}); });
+        };
+        req.onsuccess = function(){ db = req.result; res(db); };
+        req.onerror = function(){ rej(req.error || new Error('IndexedDBを開けませんでした')); };
+        req.onblocked = function(){ rej(new Error('IndexedDBが他のタブにブロックされています')); };
+      });
+    }
+    function storeTx(store, mode){ return db.transaction(store, mode).objectStore(store); }
+    function dbGet(store, id){
+      return new Promise(function(res, rej){
+        var r = storeTx(store, 'readonly').get(id);
+        r.onsuccess = function(){ res(r.result || null); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
+    function dbAll(store){
+      return new Promise(function(res, rej){
+        var r = storeTx(store, 'readonly').getAll();
+        r.onsuccess = function(){ res(r.result || []); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
+    function dbPut(store, rec){
+      return new Promise(function(res, rej){
+        var r = storeTx(store, 'readwrite').put(rec);
+        r.onsuccess = function(){ res(rec); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
+    function dbClear(store){
+      return new Promise(function(res, rej){
+        var r = storeTx(store, 'readwrite').clear();
+        r.onsuccess = function(){ res(); };
+        r.onerror = function(){ rej(r.error); };
+      });
+    }
+    function saveRecord(store, rec){
+      var t = nowIso();
+      if (!rec.id) rec.id = genId(store.replace(/s$/,''));
+      if (!rec.createdAt) rec.createdAt = t;
+      rec.updatedAt = t;
+      if (LAW_STORES[store]) rec.confirmation = normalizeConfirmation(rec.confirmation);
+      return dbPut(store, rec);
+    }
+    function getCounts(){
+      var out = {};
+      var chain = Promise.resolve();
+      STORES.forEach(function(s){
+        chain = chain.then(function(){ return dbAll(s).then(function(rows){ out[s] = rows.length; }); });
+      });
+      return chain.then(function(){ return out; });
+    }
+
+    /* ================= 版管理・移行 =================
+       MIGRATIONS: 将来 SCHEMA_VERSION を上げたときに、版ごとの移行処理をここへ追加する。
+       例) 2: function(){ return Promise.resolve(); }  // v1 -> v2 の移行
+       移行は既存データを削除しないことを原則とする。 */
+    var MIGRATIONS = {};
+    function addMigrationLog(entry){
+      return dbGet('meta', 'migrationLog').then(function(rec){
+        rec = rec || {id:'migrationLog', entries:[], createdAt: nowIso()};
+        rec.entries.push(entry);
+        if (rec.entries.length > 50) rec.entries = rec.entries.slice(rec.entries.length - 50);
+        rec.updatedAt = nowIso();
+        return dbPut('meta', rec);
+      });
+    }
+    function runMigrationCheck(){
+      return dbGet('meta', 'schema').then(function(schema){
+        var t = nowIso();
+        if (!schema){
+          return dbPut('meta', {id:'schema', schemaVersion: SCHEMA_VERSION, createdAt: t, updatedAt: t})
+            .then(function(){ return addMigrationLog({at:t, from:0, to:SCHEMA_VERSION, note:'データ構造を初期化しました（v' + SCHEMA_VERSION + '）'}); });
+        }
+        if (schema.schemaVersion < SCHEMA_VERSION){
+          var from = schema.schemaVersion;
+          var chain = Promise.resolve();
+          for (var v = from + 1; v <= SCHEMA_VERSION; v++){
+            (function(step){
+              chain = chain.then(function(){ return MIGRATIONS[step] ? MIGRATIONS[step]() : null; });
+            })(v);
+          }
+          return chain.then(function(){
+            schema.schemaVersion = SCHEMA_VERSION; schema.updatedAt = t;
+            return dbPut('meta', schema);
+          }).then(function(){
+            return addMigrationLog({at:t, from:from, to:SCHEMA_VERSION, note:'データ構造を v' + from + ' から v' + SCHEMA_VERSION + ' へ移行しました（既存データは保持）'});
+          });
+        }
+        return addMigrationLog({at:t, from:schema.schemaVersion, to:SCHEMA_VERSION, note:'移行チェック済み：現在の版は v' + schema.schemaVersion + ' で、移行対象はありませんでした'});
+      });
+    }
+
+    /* ================= UI状態（続きから再開） ================= */
+    function getUiState(){ return dbGet('meta', 'uiState'); }
+    function saveUiState(patch){
+      return getUiState().then(function(cur){
+        cur = cur || {id:'uiState', createdAt: nowIso()};
+        Object.keys(patch).forEach(function(k){ cur[k] = patch[k]; });
+        cur.updatedAt = nowIso();
+        return dbPut('meta', cur);
+      }).catch(function(){});
+    }
+
+/* ================= 画面遷移 ================= */
+var TABS = {home:'view-home', reference:'view-reference', questions:'view-questions', dict:'view-dict', settings:'view-settings'};
+var TAB_LABELS = {home:'ホーム', reference:'参考書', questions:'問題', dict:'辞典・計算', settings:'設定'};
+var currentTab = 'home';
+function switchTab(tab, skipSave){
+if (!TABS[tab]) tab = 'home';
+currentTab = tab;
+Object.keys(TABS).forEach(function(k){ $(TABS[k]).classList.toggle('active', k === tab);});
+var btns = document.querySelectorAll('.tabbtn');
+for (var i=0;i<btns.length;i++) btns[i].classList.toggle('active', btns[i].getAttribute('data-tab') === tab);
+window.scrollTo(0, 0);
+if (!skipSave && db) saveUiState({lastTab: tab});
+if (tab === 'reference') renderItems();
+if (tab === 'questions') renderQuestions();
+if (tab === 'dict') renderNumbers();
+}
+
+/* ================= モーダル / シート ================= */
+function openModal(html){
+$('modalBody').innerHTML = html;
+$('modalOverlay').classList.add('open');
+}
+function closeModal(){ $('modalOverlay').classList.remove('open'); $('modalBody').innerHTML = '';}
+function openSheet(html){
+$('sheetBody').innerHTML = html;
+$('sheetOverlay').classList.add('open');
+}
+function closeSheet(){ $('sheetOverlay').classList.remove('open'); $('sheetBody').innerHTML = '';}
+var confirmResolve = null;
+function askConfirm(title, bodyHtml, okLabel){
+openModal(
+'<h2>' + esc(title) + '</h2>' +
+'<div class="small">' + bodyHtml + '</div>' +
+'<div class="hstack" style="margin-top:16px">' +
+'<button class="btn ghost" type="button" id="confirmCancel">キャンセル</button>' +
+'<button class="btn danger" type="button" id="confirmOk" style="background:var(--danger);color:#fff;border-color:transparent">' + esc(okLabel || '実行する') + '</button>' +
+'</div>'
+);
+return new Promise(function(res){
+confirmResolve = res;
+$('confirmCancel').addEventListener('click', function(){ closeModal(); res(false);});
+$('confirmOk').addEventListener('click', function(){ closeModal(); res(true);});
+});
+}
+
+/* ================= 送信先の説明 ================= */
+function openSendInfo(){
+openModal(
+'<button class="closebtn" type="button" id="sendInfoCloseX" aria-label="閉じる">×</button>' +
+'<h2 style="padding-right:44px">AIを使うときに送られる情報</h2>' +
+'<p class="small">AI機能（フェーズ1以降で実装するOCR・問題生成・質問など）を使う場合、このアプリはあなたの端末から <strong>Google の Gemini API（generativelanguage.googleapis.com）</strong> へ直接リクエストを送ります。アプリ専用のサーバーはなく、他のサーバーへ内容が送られることはありません。</p>' +
+'<h3>送るもの（AI機能を使うときに限ります）</h3>' +
+'<ul class="tight">' +
+'<li>読み取りたい写真の画像（OCRを使う場合）</li>' +
+'<li>対象の参考書項目のテキストや、あなたが入力した質問文</li>' +
+'<li>問題生成に必要な条文・数字などの学習データの一部</li>' +
+'</ul>' +
+'<p class="small">送信する前には、その都度、送信内容と送信先（Google）を画面でお知らせします。フェーズ0の時点ではAI機能自体が未実装のため、いまは何も送信されません。</p>' +
+'<h3>送らないもの</h3>' +
+'<ul class="tight">' +
+'<li>APIキーは Google への認証にのみ使います。他のサーバーには送信しません。</li>' +
+'<li>バックアップファイルにAPIキーは含まれません。</li>' +
+'<li>AIを使わない操作（保存・閲覧・バックアップなど）では、学習データが端末の外に出ることはありません。</li>' +
+'</ul>' +
+'<h3>無料枠について</h3>' +
+'<p class="small">無料枠には回数・量の上限があり、上限に達すると一時的に使えなくなります（エラー429など）。時間を置くと回復します。このアプリが有料枠へ自動で切り替えることはありません。ただし、課金設定が有効なプロジェクトのキーを使うと費用が発生しうる点は、設定画面の注意書きをご確認ください。</p>' +
+'<button class="btn primary block" type="button" id="sendInfoClose" style="margin-top:14px">閉じる</button>'
+);
+$('sendInfoClose').addEventListener('click', closeModal);
+$('sendInfoCloseX').addEventListener('click', closeModal);
+}
+
+/* ================= Gemini APIキー ================= */
+var KEY_STORAGE_NAME = 'horeiMaster.geminiApiKey';
+var KEY_MODE_NAME = 'horeiMaster.geminiKeyMode';
+function getStoredKey(){
+var s = null, l = null;
+try { s = sessionStorage.getItem(KEY_STORAGE_NAME);} catch(e){}
+try { l = localStorage.getItem(KEY_STORAGE_NAME);} catch(e){}
+if (s) return {key: s, where: 'session'};
+if (l) return {key: l, where: 'local'};
+return null;
+}
+function renderKeyStatus(){
+var box = $('keyStatus');
+var cur = getStoredKey();
+if (!cur){
+box.innerHTML = '<div class="notice" style="margin-top:12px">APIキーはまだ登録されていません。フェーズ0では登録・保持の確認だけを行い、実際にAIへ送信する機能はまだありません。</div>';
+return;
+}
+var tail = cur.key.length >= 4? cur.key.slice(-4): '••••';
+box.innerHTML = '<div class="okbox" style="margin-top:12px">登録済みのキー： <span class="keystat">••••••••' + esc(tail) + '</span><br>' +
+'<span class="small">保存先： ' + (cur.where === 'session'? 'セッションのみ（タブ／アプリを閉じると消えます）': 'この端末のブラウザ内（localStorage）') + '。セキュリティのため、キーの全文は表示しません。</span></div>';
+}
+function saveKey(){
+var v = $('apiKeyInput').value.trim();
+if (!v){ toast('APIキーを入力してください'); return;}
+var sessionOnly = $('sessionOnly').checked;
+try {
+if (sessionOnly){
+sessionStorage.setItem(KEY_STORAGE_NAME, v);
+localStorage.removeItem(KEY_STORAGE_NAME);
+localStorage.setItem(KEY_MODE_NAME, 'session');
+} else {
+localStorage.setItem(KEY_STORAGE_NAME, v);
+try { sessionStorage.removeItem(KEY_STORAGE_NAME);} catch(e){}
+localStorage.setItem(KEY_MODE_NAME, 'local');
+}
+} catch(e){
+toast('キーを保存できませんでした（ブラウザの保存が制限されています）');
+return;
+}
+$('apiKeyInput').value = '';
+renderKeyStatus();
+toast(sessionOnly? 'キーをこのセッションだけ保持しました': 'APIキーを保存しました');
+}
+function deleteKey(){
+try { localStorage.removeItem(KEY_STORAGE_NAME);} catch(e){}
+try { sessionStorage.removeItem(KEY_STORAGE_NAME);} catch(e){}
+try { localStorage.removeItem(KEY_MODE_NAME);} catch(e){}
+$('apiKeyInput').value = '';
+renderKeyStatus();
+toast('APIキーを削除しました');
+}
+
+/* ================= 描画：件数・容量 ================= */
+function renderCounts(counts){
+var els = document.querySelectorAll('.js-count');
+for (var i=0;i<els.length;i++){
+var s = els[i].getAttribute('data-store');
+els[i].textContent = (counts && counts[s]!= null)? String(counts[s]): '–';
+}
+var html = STORES.filter(function(s){ return s!== 'meta';}).map(function(s){
+return '<div class="cell"><div class="n">' + (counts? counts[s]: '–') + '</div><div class="l">' + esc(STORE_LABELS[s]) + '</div></div>';
+}).join('');
+$('homeCounts').innerHTML = html;
+$('settingsCounts').innerHTML = html;
+}
+function renderStorage(){
+var fallback = 'このブラウザでは容量の目安を取得できませんでした';
+if (navigator.storage && navigator.storage.estimate){
+navigator.storage.estimate().then(function(est){
+var txt;
+if (est && typeof est.usage === 'number'){
+var mb = (est.usage / (1024*1024));
+txt = '約 ' + (mb < 0.1? (est.usage/1024).toFixed(1) + ' KB': mb.toFixed(2) + ' MB') + ' を使用中';
+if (typeof est.quota === 'number') txt += '（上限の目安 約 ' + (est.quota/(1024*1024)).toFixed(0) + ' MB）';
+} else txt = fallback;
+$('homeStorage').textContent = txt;
+$('settingsStorage').textContent = txt;
+}).catch(function(){
+$('homeStorage').textContent = fallback;
+$('settingsStorage').textContent = fallback;
+});
+} else {
+$('homeStorage').textContent = fallback;
+$('settingsStorage').textContent = fallback;
+}
+}
+function renderReviewCount(){
+return dbAll('histories').then(function(rows){
+var end = new Date(); end.setHours(23,59,59,999);
+var n = 0;
+rows.forEach(function(r){
+if (r.nextReviewAt){
+var d = new Date(r.nextReviewAt);
+if (!isNaN(d.getTime()) && d <= end) n++;
+}
+});
+$('reviewCount').textContent = String(n);
+});
+}
+function renderResume(){
+return getUiState().then(function(st){
+var card = $('resumeCard');
+if (st && st.lastItemId && st.lastItemTitle){
+$('resumeText').innerHTML = '前回開いていた項目：<strong>' + esc(st.lastItemTitle) + '</strong><br><span class="tiny">タブ：' + esc(TAB_LABELS[st.lastTab] || '参考書') + ' ／ ' + fmtDateTime(st.lastItemViewedAt || st.updatedAt) + '</span>';
+card.style.display = '';
+$('resumeBtn').onclick = function(){
+switchTab('reference');
+openItem(st.lastItemId);
+};
+} else if (st && st.lastTab && st.lastTab!== 'home'){
+$('resumeText').innerHTML = '前回開いていたタブ：<strong>' + esc(TAB_LABELS[st.lastTab]) + '</strong>';
+card.style.display = '';
+$('resumeBtn').onclick = function(){ switchTab(st.lastTab);};
+} else {
+card.style.display = 'none';
+}
+});
+}
+function renderMigrationLog(){
+return dbGet('meta', 'migrationLog').then(function(rec){
+var box = $('migrationLog');
+if (!rec ||!rec.entries ||!rec.entries.length){
+box.innerHTML = '<div class="entry">移行ログはまだありません。</div>';
+return;
+}
+var entries = rec.entries.slice().reverse();
+box.innerHTML = entries.map(function(e){
+return '<div class="entry"><span class="when">' + esc(fmtDateTime(e.at)) + '</span>　v' + esc(e.from) + ' → v' + esc(e.to) + '：' + esc(e.note) + '</div>';
+}).join('');
+});
+}
+function refreshAll(){
+if (!db) return Promise.resolve();
+return getCounts().then(function(counts){
+renderCounts(counts);
+return renderReviewCount();
+}).then(function(){
+return renderResume();
+}).then(function(){
+return renderMigrationLog();
+}).then(function(){
+renderStorage();
+$('homeSaveState').textContent = 'IndexedDBに保存されています';
+$('homeSchema').textContent = 'v' + SCHEMA_VERSION;
+$('settingsSchema').textContent = 'v' + SCHEMA_VERSION;
+$('schemaVersionText').textContent = String(SCHEMA_VERSION);
+$('savedAt').textContent = '最終確認 ' + fmtDateTime(nowIso());
+});
+}
+
+/* ================= 参考書 ================= */
+function renderItems(){
+var list = $('itemList');
+if (!db){ list.innerHTML = '<div class="empty">データベースが使えないため表示できません。</div>'; return;}
+dbAll('items').then(function(rows){
+rows.sort(function(a,b){ return String(a.createdAt||'').localeCompare(String(b.createdAt||''));});
+if (!rows.length){
+list.innerHTML = '<div class="empty">参考書項目はまだありません。<br>「設定」→「データ管理」から確認用サンプルデータを作成すると、ここに表示されます。</div>';
+return;
+}
+list.innerHTML = rows.map(function(r){
+return '<button class="row" type="button" data-item-id="' + esc(r.id) + '">' +
+'<span class="grow"><span class="ttl">' + esc(r.title || '（無題）') + '</span>' +
+'<span class="sub" style="display:block">' + esc(r.law || '') + (r.category? ' ・ ' + esc(r.category): '') + ' ・ 更新 ' + esc(fmtDate(r.updatedAt)) + '</span></span>' +
+confirmationBadge(r.confirmation) +
+'<span class="chev">›</span></button>';
+}).join('');
+var btns = list.querySelectorAll('[data-item-id]');
+for (var i=0;i<btns.length;i++){
+btns[i].addEventListener('click', function(){ openItem(this.getAttribute('data-item-id'));});
+}
+}).catch(function(){
+list.innerHTML = '<div class="empty">読み込みに失敗しました。</div>';
+});
+}
+function openItem(id){
+if (!db) return;
+dbGet('items', id).then(function(r){
+if (!r){ toast('項目が見つかりませんでした'); return;}
+saveUiState({lastTab:'reference', lastItemId: r.id, lastItemTitle: r.title || '', lastItemViewedAt: nowIso()}).then(function(){ renderResume();});
+var html = '<h2>' + esc(r.title || '（無題）') + '</h2>';
+html += '<p style="margin:0 0 10px">' + confirmationBadge(r.confirmation) + (r.isSample? ' <span class="badge sample">動作確認用サンプル</span>': '') + '</p>';
+if (r.law || r.category) html += '<p class="small" style="margin:0 0 10px">' + esc(r.law || '') + (r.category? ' ・ ' + esc(r.category): '') + '</p>';
+if (r.body) html += '<div style="white-space:pre-wrap; font-size:15px">' + esc(r.body) + '</div>';
+html += '<div class="divider"></div><h3>記録情報</h3>';
+html += '<dl class="kv"><dt>項目ID</dt><dd class="mono">' + esc(r.id) + '</dd>' +
+'<dt>作成日時</dt><dd>' + esc(fmtDateTime(r.createdAt)) + '</dd>' +
+'<dt>更新日時</dt><dd>' + esc(fmtDateTime(r.updatedAt)) + '</dd></dl>';
+html += '<h3>法令情報の確認状態</h3>' + confirmationDetailHtml(r.confirmation);
+html += '<p class="tiny" style="margin-top:12px">この項目を開いたことが「続きから再開」に記録されました。項目の編集・統合はフェーズ2で実装します。</p>';
+html += '<button class="btn ghost block" type="button" id="sheetCloseBtn" style="margin-top:10px">閉じる</button>';
+openSheet(html);
+$('sheetCloseBtn').addEventListener('click', closeSheet);
+});
+}
+
+/* ================= 問題・辞典（保存済みデータの表示のみ） ================= */
+function renderQuestions(){
+var box = $('questionList');
+if (!db){ box.innerHTML = ''; return;}
+dbAll('questions').then(function(rows){
+if (!rows.length){ box.innerHTML = ''; return;}
+var html = '<div class="card flush">' + rows.map(function(r){
+return '<div class="row"><span class="grow"><span class="ttl">' + esc(r.title || r.stem || '（無題の問題）') + '</span>' +
+'<span class="sub" style="display:block">' + esc(r.law || '') + ' ・ 登録のみ（演習は未実装）</span></span>' + confirmationBadge(r.confirmation) + '</div>';
+}).join('') + '</div>';
+box.innerHTML = html;
+}).catch(function(){ box.innerHTML = '';});
+}
+function renderNumbers(){
+var box = $('numberList');
+if (!db){ box.innerHTML = ''; return;}
+dbAll('numbers').then(function(rows){
+if (!rows.length){ box.innerHTML = ''; return;}
+var html = '<div class="card flush">' + rows.map(function(r){
+return '<div class="row"><span class="grow"><span class="ttl">' + esc(r.display || '') + '　' + esc(r.label || '') + '</span>' +
+'<span class="sub" style="display:block">' + esc(r.law || '') + (r.meaning? ' ・ ' + esc(r.meaning): '') + '</span></span>' + confirmationBadge(r.confirmation) + '</div>';
+}).join('') + '</div>';
+box.innerHTML = html;
+}).catch(function(){ box.innerHTML = '';});
+}
+
+/* ================= サンプルデータ ================= */
+function createSampleData(){
+if (!db){ toast('データベースが使えません'); return;}
+dbAll('items').then(function(items){
+var exists = items.some(function(r){ return r.isSample;});
+if (exists){ toast('サンプルデータはすでに作成されています'); return null;}
+var t = nowIso();
+var unconfirmed = {status:'unconfirmed', source:'', articleRef:'', effectiveDate:'', checkedAt:''};
+var item1 = {id: genId('item'), title:'地方公共団体の種類', law:'地方自治法', category:'地方公共団体',
+body:'地方公共団体には、都道府県・市町村である普通地方公共団体と、特別区・地方公共団体の組合・財産区などの特別地方公共団体があります。これは保存と表示の動作確認用テキストであり、条文の正確な内容は公式情報で確認してください。',
+isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var item2 = {id: genId('item'), title:'議会の招集', law:'地方自治法', category:'議会',
+body:'議会の定例会・臨時会の招集に関する項目のサンプルです。保存・再読み込み・バックアップ・復元が正しく動くかを確認するためのもので、法令の確認済み情報ではありません。',
+isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var num1 = {id: genId('number'), display:'4年', label:'議会の議員の任期（サンプル）', law:'地方自治法', meaning:'動作確認用の数字データです。根拠条文・施行日は未照合のため未確認です。',
+isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var num2 = {id: genId('number'), display:'30日', label:'期限のサンプル', law:'地方自治法', meaning:'期限計算の動作確認に使う想定のサンプル数字です。起算点や計算ルールはフェーズ4で確認済みデータとして整備します。',
+isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var q1 = {id: genId('question'), title:'サンプル問題：地方公共団体の種類', law:'地方自治法',
+stem:'普通地方公共団体にあたるものはどれか（動作確認用サンプル問題）。', isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var q2 = {id: genId('question'), title:'サンプル問題：任期の数字', law:'地方自治法',
+stem:'数字データとの関連付けを確認するためのサンプル問題です。', isSample:true, confirmation: unconfirmed, createdAt:t, updatedAt:t};
+var link1 = {id: genId('link'), fromId: item1.id, toId: num1.id, type:'item-number', createdAt:t, updatedAt:t};
+var link2 = {id: genId('link'), fromId: item1.id, toId: q1.id, type:'item-question', createdAt:t, updatedAt:t};
+var link3 = {id: genId('link'), fromId: num1.id, toId: q2.id, type:'number-question', createdAt:t, updatedAt:t};
+var jobs = [
+saveRecord('items', item1), saveRecord('items', item2),
+saveRecord('numbers', num1), saveRecord('numbers', num2),
+saveRecord('questions', q1), saveRecord('questions', q2),
+saveRecord('links', link1), saveRecord('links', link2), saveRecord('links', link3)
+];
+return Promise.all(jobs);
+}).then(function(done){
+if (done){
+toast('サンプルデータを作成しました');
+refreshAll();
+renderItems();
+}
+}).catch(function(){ toast('サンプルデータの作成に失敗しました');});
+}
+
+    /* ================= バックアップ ================= */
+    function collectBackup(){
+      var data = {};
+      var chain = Promise.resolve();
+      STORES.forEach(function(s){
+        chain = chain.then(function(){ return dbAll(s).then(function(rows){ data[s] = rows; }); });
+      });
+      return chain.then(function(){
+        var imageFiles = [];
+        var checksums = [];
+        var imgChain = Promise.resolve();
+        (data.images || []).forEach(function(img){
+          imgChain = imgChain.then(function(){
+            if (img.dataBase64){
+              var u8 = b64ToU8(img.dataBase64);
+              var fname = 'images/' + img.id + '.' + extForMime(img.mimeType || 'image/jpeg');
+              imageFiles.push({name: fname, data: u8});
+              return sha256Hex(u8).then(function(h){ checksums.push({id: img.id, file: fname, sha256: h}); });
+            }
+            checksums.push({id: img.id, file: null, sha256: null, note: '画像データ本体なし'});
+            return null;
+          });
+        });
+        return imgChain.then(function(){
+          var exportData = {};
+          STORES.forEach(function(s){
+            if (s === 'images'){
+              exportData[s] = (data[s] || []).map(function(img){
+                var copy = {};
+                Object.keys(img).forEach(function(k){ if (k !== 'dataBase64') copy[k] = img[k]; });
+                return copy;
+              });
+            } else {
+              exportData[s] = data[s];
+            }
+          });
+          var counts = {};
+          STORES.forEach(function(s){ counts[s] = (data[s] || []).length; });
+          var manifest = {
+            app: '法令マスター',
+            appId: 'horei-master',
+            backupFormat: 1,
+            schemaVersion: SCHEMA_VERSION,
+            exportedAt: nowIso(),
+            counts: counts,
+            imageChecksums: checksums,
+            apiKeyIncluded: false,
+            note: 'Gemini APIキーはこのバックアップに含まれていません。',
+            data: exportData
+          };
+          return {manifest: manifest, imageFiles: imageFiles};
+        });
+      });
+    }
+    function createBackup(){
+      if (!db){ toast('データベースが使えません'); return Promise.resolve(false); }
+      return collectBackup().then(function(bundle){
+        var files = [{name:'manifest.json', data: new TextEncoder().encode(JSON.stringify(bundle.manifest, null, 2))}];
+        files.push({name:'images/', data: new Uint8Array(0)});
+        bundle.imageFiles.forEach(function(f){ files.push(f); });
+        var blob = zipBuild(files);
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        var stamp = new Date();
+        var p = function(n){ return ('0'+n).slice(-2); };
+        a.href = url;
+        a.download = 'horei-master-backup-' + stamp.getFullYear() + p(stamp.getMonth()+1) + p(stamp.getDate()) + '-' + p(stamp.getHours()) + p(stamp.getMinutes()) + '.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 4000);
+        toast('完全バックアップを作成しました');
+        return true;
+      }).catch(function(e){
+        toast('バックアップの作成に失敗しました');
+        return false;
+      });
+    }
+
+    /* ================= 復元 ================= */
+    var pendingRestore = null;
+    function handleRestoreFile(file){
+      var box = $('restorePreview');
+      pendingRestore = null;
+      if (!file) { box.innerHTML = ''; return; }
+      box.innerHTML = '<div class="notice">ファイルを読み込んでいます…</div>';
+      file.arrayBuffer().then(function(buf){
+        return zipParse(buf);
+      }).then(function(files){
+        var m = files['manifest.json'];
+        if (!m) throw new Error('manifest.json が見つかりません。法令マスターのバックアップファイルか確認してください。');
+        var manifest = JSON.parse(new TextDecoder().decode(m));
+        if (manifest.appId !== 'horei-master' || !manifest.data) throw new Error('このファイルは法令マスターのバックアップではないようです。');
+        pendingRestore = {manifest: manifest, files: files};
+        var countsHtml = STORES.filter(function(s){ return s !== 'meta'; }).map(function(s){
+          var n = manifest.counts && manifest.counts[s] != null ? manifest.counts[s] : ((manifest.data[s] || []).length);
+          return '<div class="cell"><div class="n">' + esc(n) + '</div><div class="l">' + esc(STORE_LABELS[s]) + '</div></div>';
+        }).join('');
+        box.innerHTML =
+          '<div class="card" style="background:var(--surface2); margin:0">' +
+            '<h2>復元プレビュー</h2>' +
+            '<dl class="kv">' +
+              '<dt>書き出し日時</dt><dd>' + esc(fmtDateTime(manifest.exportedAt)) + '</dd>' +
+              '<dt>データ構造の版</dt><dd>v' + esc(manifest.schemaVersion) + '（現在のアプリは v' + SCHEMA_VERSION + '）</dd>' +
+              '<dt>アプリ</dt><dd>' + esc(manifest.app || '') + '</dd>' +
+              '<dt>画像チェックサム</dt><dd>' + esc((manifest.imageChecksums || []).length) + ' 件分を記録</dd>' +
+            '</dl>' +
+            '<div class="grid" style="margin-top:12px">' + countsHtml + '</div>' +
+            '<div class="warnbox" style="margin-top:12px"><strong>注意：</strong>復元すると、現在のデータはバックアップの内容で上書きされます。IDはバックアップ時のものがそのまま保持されます。心配な場合は、先に現在のバックアップを作成してください。</div>' +
+            '<div class="stack">' +
+              '<button class="btn ghost" type="button" id="preRestoreBackupBtn">復元前に現在のバックアップを作成</button>' +
+              '<button class="btn primary" type="button" id="doRestoreBtn">この内容で復元する</button>' +
+              '<button class="btn ghost" type="button" id="cancelRestoreBtn">やめる</button>' +
+            '</div>' +
+          '</div>';
+        $('preRestoreBackupBtn').addEventListener('click', function(){ createBackup(); });
+        $('cancelRestoreBtn').addEventListener('click', function(){ pendingRestore = null; box.innerHTML = ''; $('restoreFile').value = ''; });
+        $('doRestoreBtn').addEventListener('click', doRestore);
+      }).catch(function(e){
+        box.innerHTML = '<div class="dangerbox" style="margin:0"><strong>読み込めませんでした。</strong><br>' + esc(e && e.message ? e.message : '不明なエラー') + '</div>';
+      });
+    }
+    function doRestore(){
+      if (!pendingRestore || !db){ toast('復元できるデータがありません'); return; }
+      var manifest = pendingRestore.manifest;
+      var files = pendingRestore.files;
+      askConfirm('復元を実行しますか？',
+        '現在のデータはバックアップ（' + esc(fmtDateTime(manifest.exportedAt)) + ' 書き出し）の内容で上書きされます。この操作は元に戻せません。',
+        '上書きして復元する'
+      ).then(function(ok){
+        if (!ok) return;
+        var chain = Promise.resolve();
+        STORES.forEach(function(s){ chain = chain.then(function(){ return dbClear(s); }); });
+        chain = chain.then(function(){
+          var putChain = Promise.resolve();
+          STORES.forEach(function(s){
+            if (s === 'images') return;
+            (manifest.data[s] || []).forEach(function(rec){
+              putChain = putChain.then(function(){
+                if (LAW_STORES[s]) rec.confirmation = normalizeConfirmation(rec.confirmation);
+                return dbPut(s, rec);
+              });
+            });
+          });
+          (manifest.data.images || []).forEach(function(img){
+            putChain = putChain.then(function(){
+              var copy = {};
+              Object.keys(img).forEach(function(k){ copy[k] = img[k]; });
+              var chk = (manifest.imageChecksums || []).filter(function(c){ return c.id === img.id; })[0];
+              if (chk && chk.file && files[chk.file]){
+                var u8 = files[chk.file];
+                copy.dataBase64 = u8ToB64(u8);
+                return sha256Hex(u8).then(function(h){
+                  copy.checksumOk = (!chk.sha256 || chk.sha256.indexOf('crc32:') === 0) ? copy.checksumOk : (h === chk.sha256);
+                  return dbPut('images', copy);
+                });
+              }
+              return dbPut('images', copy);
+            });
+          });
+          return putChain;
+        }).then(function(){
+          return runMigrationCheck();
+        }).then(function(){
+          return addMigrationLog({at: nowIso(), from: SCHEMA_VERSION, to: SCHEMA_VERSION, note:'バックアップ（' + fmtDateTime(manifest.exportedAt) + ' 書き出し）から復元しました'});
+        }).then(function(){
+          pendingRestore = null;
+          $('restorePreview').innerHTML = '<div class="okbox" style="margin:0">復元が完了しました。IDはバックアップ時のまま保持されています。</div>';
+          $('restoreFile').value = '';
+          refreshAll(); renderItems(); renderQuestions(); renderNumbers();
+          toast('復元が完了しました');
+        }).catch(function(){
+          $('restorePreview').innerHTML = '<div class="dangerbox" style="margin:0"><strong>復元に失敗しました。</strong>データが不完全な状態の可能性があるため、バックアップから再度復元するか、全データ削除後に復元し直してください。</div>';
+        });
+      });
+    }
+
+    /* ================= 全データ削除 ================= */
+    function deleteAllData(){
+      if (!db){ toast('データベースが使えません'); return; }
+      askConfirm('全データを削除しますか？',
+        'IndexedDB内のすべての学習データ（参考書・画像・問題・履歴・書き込み・関連付けなど）が削除されます。この操作は元に戻せません。APIキーは削除されません。',
+        'すべて削除する'
+      ).then(function(ok){
+        if (!ok) return;
+        var chain = Promise.resolve();
+        STORES.forEach(function(s){ chain = chain.then(function(){ return dbClear(s); }); });
+        return chain.then(function(){
+          var t = nowIso();
+          return dbPut('meta', {id:'schema', schemaVersion: SCHEMA_VERSION, createdAt: t, updatedAt: t});
+        }).then(function(){
+          return addMigrationLog({at: nowIso(), from: SCHEMA_VERSION, to: SCHEMA_VERSION, note:'全データを削除し、データ構造を初期化しました（v' + SCHEMA_VERSION + '）'});
+        }).then(function(){
+          pendingRestore = null;
+          $('restorePreview').innerHTML = '';
+          refreshAll(); renderItems(); renderQuestions(); renderNumbers();
+          toast('全データを削除しました');
+        });
+      }).catch(function(){ toast('削除に失敗しました'); });
+    }
+
+    /* ================= サンプル作成（設定画面から） ================= */
+    /* createSampleData は前のスクリプトで定義済み */
+
+    /* ================= 初期化 ================= */
+    function bindEvents(){
+      var btns = document.querySelectorAll('.tabbtn');
+      for (var i=0;i<btns.length;i++){
+        btns[i].addEventListener('click', function(){ switchTab(this.getAttribute('data-tab')); });
+      }
+      $('sheetClose').addEventListener('click', closeSheet);
+      $('sheetOverlay').addEventListener('click', function(e){ if (e.target === this) closeSheet(); });
+      $('modalOverlay').addEventListener('click', function(e){
+        if (e.target === this || e.target.classList.contains('modalwrap')){
+          if (confirmResolve){ var r = confirmResolve; confirmResolve = null; r(false); }
+          closeModal();
+        }
+      });
+      $('saveKeyBtn').addEventListener('click', saveKey);
+      $('deleteKeyBtn').addEventListener('click', function(){
+        askConfirm('APIキーを削除しますか？', 'この端末に保存されているGemini APIキーを削除します。AI機能を使うときは再入力が必要です。', '削除する')
+          .then(function(ok){ if (ok) deleteKey(); });
+      });
+      $('openSendInfoBtn').addEventListener('click', openSendInfo);
+      $('createSampleBtn').addEventListener('click', createSampleData);
+      $('backupBtn').addEventListener('click', function(){ createBackup(); });
+      $('restoreFile').addEventListener('change', function(){ handleRestoreFile(this.files && this.files[0]); });
+      $('deleteAllBtn').addEventListener('click', deleteAllData);
+    }
+    function init(){
+      bindEvents();
+      renderKeyStatus();
+      var mode = null;
+      try { mode = localStorage.getItem(KEY_MODE_NAME); } catch(e){}
+      var cur = getStoredKey();
+      if (cur && cur.where === 'session') $('sessionOnly').checked = true;
+      else if (mode === 'session') $('sessionOnly').checked = true;
+      switchTab('home', true);
+      if (!idbAvailable){
+        $('idbError').style.display = '';
+        $('dbStatus').textContent = 'IndexedDBが使えません';
+        $('dbDot').classList.add('off');
+        $('homeSaveState').textContent = '保存できません（IndexedDBが使えません）';
+        $('settingsStorage').textContent = '取得できません';
+        $('homeStorage').textContent = '取得できません';
+        renderCounts(null);
+        return;
+      }
+      openDB().then(function(){
+        $('dbStatus').textContent = 'IndexedDBに保存中';
+        $('dbDot').classList.add('on');
+        return runMigrationCheck();
+      }).then(function(){
+        return refreshAll();
+      }).then(function(){
+        return getUiState();
+      }).then(function(st){
+        if (st && st.lastItemId){
+          /* 再読み込み後も「続きから再開」がホームに表示される（自動では開かない） */
+        }
+      }).catch(function(){
+        $('idbError').style.display = '';
+        $('dbStatus').textContent = 'IndexedDBを開けませんでした';
+        $('dbDot').classList.add('off');
+        $('homeSaveState').textContent = '保存できません（IndexedDBを開けませんでした）';
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+    </script>
+  </body>
+</html>
