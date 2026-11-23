@@ -1718,18 +1718,44 @@ renderItems();
           try {
             var w = img.naturalWidth, h = img.naturalHeight;
             if (!w || !h){ finish(null); return; }
-            var scale = Math.min(1, 360 / Math.max(w, h));
+            /* サムネイルは一覧表示専用だが、Retina画面でも文字が判読できるよう
+               長辺720px・品質0.85で生成する（旧版は360px・0.72で、拡大表示に流用すると
+               文字がぼやけて読めなかった）。確認用の表示は必ず原本を使うこと。 */
+            var scale = Math.min(1, 720 / Math.max(w, h));
             var cv = document.createElement('canvas');
             cv.width = Math.max(1, Math.round(w * scale));
             cv.height = Math.max(1, Math.round(h * scale));
             cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
-            var du = cv.toDataURL('image/jpeg', 0.72);
-            finish({base64: du.split(',')[1], width: w, height: h});
+            var du = cv.toDataURL('image/jpeg', 0.85);
+            finish({base64: du.split(',')[1], width: w, height: h, thumbV: 2});
           } catch(e){ finish(null); }
         };
         img.onerror = function(){ finish(null); };
         img.src = url;
       });
+    }
+    /* 旧版（長辺360px）で作られたサムネイルを持つ既存画像について、保存済みの
+       原本から高解像度サムネイルを作り直す。原本データ自体は変更しない。
+       起動時にバックグラウンドで実行し、失敗しても表示は従来どおり動く。 */
+    function upgradeThumbs(){
+      if (!db) return Promise.resolve();
+      return dbAll('images').then(function(rows){
+        var chain = Promise.resolve();
+        rows.forEach(function(rec){
+          if (!rec || rec.thumbV === 2 || !rec.dataBase64) return;
+          chain = chain.then(function(){
+            var blob;
+            try { blob = new Blob([b64ToU8(rec.dataBase64)], {type: rec.mimeType || 'image/jpeg'}); }
+            catch(e){ return null; }
+            return makeThumb(blob).then(function(th){
+              rec.thumbV = 2;
+              if (th){ rec.thumbBase64 = th.base64; rec.width = th.width; rec.height = th.height; }
+              return dbPut('images', rec).catch(function(){});
+            });
+          });
+        });
+        return chain;
+      }).catch(function(){});
     }
     function processOneFile(file){
       var name = file.name || '画像';
@@ -1746,7 +1772,7 @@ renderItems();
           createdAt: nowIso(), updatedAt: nowIso()
         };
         return makeThumb(file).then(function(th){
-          if (th){ rec.thumbBase64 = th.base64; rec.width = th.width; rec.height = th.height; }
+          if (th){ rec.thumbBase64 = th.base64; rec.width = th.width; rec.height = th.height; rec.thumbV = th.thumbV; }
           return saveRecord('images', rec).then(function(){ return rec; });
         });
       });
@@ -1847,7 +1873,12 @@ renderItems();
       });
     }
     function imgSrc(img){
+      /* 一覧のサムネイル表示専用。文字を確認する画面では使わないこと（下の imgFullSrc を使う）。 */
       if (img.thumbBase64) return 'data:image/jpeg;base64,' + img.thumbBase64;
+      return 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
+    }
+    function imgFullSrc(img){
+      /* 原本そのもののデータURI。OCR確認画面や拡大表示など、文字を読む画面はこちらを使う。 */
       return 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
     }
     function ocrBadge(img){
@@ -1964,7 +1995,7 @@ renderItems();
     function openViewer(img){
       $('viewerTitle').textContent = img.name || '原本画像';
       var im = $('viewerImg');
-      im.src = 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
+      im.src = imgFullSrc(img);
       viewerFit = true;
       im.className = 'fit';
       $('viewerFitBtn').textContent = '原寸で見る';
@@ -2011,12 +2042,12 @@ renderItems();
         im.onload = function(){
           try {
             var w = im.naturalWidth, h = im.naturalHeight;
-            var scale = Math.min(1, 2000 / Math.max(w, h));
+            var scale = Math.min(1, 3000 / Math.max(w, h));
             var cv = document.createElement('canvas');
             cv.width = Math.max(1, Math.round(w * scale));
             cv.height = Math.max(1, Math.round(h * scale));
             cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
-            var du = cv.toDataURL('image/jpeg', 0.9);
+            var du = cv.toDataURL('image/jpeg', 0.92);
             res({mimeType: 'image/jpeg', base64: du.split(',')[1]});
           } catch(e){ rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）をOCR用に変換できませんでした。')); }
         };
@@ -2097,7 +2128,9 @@ renderItems();
         if (!img){ toast('画像が見つかりませんでした'); return; }
         var keyInfo = getStoredKey();
         var html = '<h2>AI OCR（文字起こし）</h2>';
-        html += '<img class="ocrimg" src="' + imgSrc(img) + '" alt="OCR対象の原本画像">';
+        /* ここは文字と照らし合わせて確認する画面なので、サムネイルではなく原本をそのまま表示する */
+        html += '<img class="ocrimg" src="' + imgFullSrc(img) + '" alt="OCR対象の原本画像">';
+        html += '<button class="btn ghost block" type="button" id="ocrViewBtn" style="margin-top:10px">原寸で拡大表示する</button>';
         html += '<p style="margin:10px 0 4px">' + ocrBadge(img) +
           (img.ocrModel ? ' <span class="tiny">使用モデル：' + esc(img.ocrModel) + '</span>' : '') +
           (img.ocrAt ? ' <span class="tiny">実行日時：' + esc(fmtDateTime(img.ocrAt)) + '</span>' : '') + '</p>';
@@ -2116,6 +2149,7 @@ renderItems();
         html += '<button class="btn primary block" type="button" id="ocrSaveBtn">読み取り結果を保存する</button>';
         html += '<button class="btn ghost block" type="button" id="ocrCloseBtn" style="margin-top:10px">閉じる</button>';
         openSheet(html);
+        $('ocrViewBtn').addEventListener('click', function(){ openViewer(img); });
         $('ocrCloseBtn').addEventListener('click', closeSheet);
         var goBtn = $('ocrGoSettings');
         if (goBtn) goBtn.addEventListener('click', function(){ closeSheet(); switchTab('settings'); });
@@ -2204,6 +2238,7 @@ renderItems();
       $('itemAddCamera').addEventListener('change', function(){ importFiles(this.files, {linkItemId: addTargetItemId}); this.value = ''; });
       $('viewerCloseBtn').addEventListener('click', closeViewer);
       $('viewerFitBtn').addEventListener('click', toggleViewerFit);
+      $('viewerImg').addEventListener('dblclick', toggleViewerFit);
     }
     function init(){
       bindEvents();
@@ -2228,6 +2263,8 @@ renderItems();
         $('dbStatus').textContent = 'IndexedDBに保存中';
         $('dbDot').classList.add('on');
         return runMigrationCheck();
+      }).then(function(){
+        return upgradeThumbs();
       }).then(function(){
         return refreshAll();
       }).then(function(){
