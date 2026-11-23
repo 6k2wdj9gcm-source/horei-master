@@ -2016,8 +2016,14 @@ renderItems();
        モデルは gemini-3.8-flash を既定とし、使えない場合は 3.7 → 3.6 → 3.5 →
        3.5-flash-lite の順に自動で切り替える。generationConfig.temperature は
        送らない（Gemini 3.6以降で非推奨となり400エラーの原因になりうるため）。
-       429（無料枠上限）・401/403（キー無効）・通信失敗は区別して表示する。
-       有料枠へ自動で切り替えることはしない。OCRが失敗しても原本画像には触れない。 */
+       503・500・502・504（サーバー混雑などの一時的なエラー）と通信失敗は、
+       少し待って同じモデルで自動再試行し、それでも続く場合は次のモデルへ切り替える。
+       429（無料枠上限）は待機して再試行し、回復しなければ上限エラーとして表示する。
+       401/403（キー無効）は即座に区別して表示する。
+       有料枠へ自動で切り替えることはしない。OCRが失敗しても原本画像には触れない。
+       送信する画像は、保存済みの原本には触れず、送信専用に長辺2560pxまでへ
+       軽量化したコピーを使う（文字の判読に十分な解像度を保ちつつ、大きな
+       写真でリクエストが重くなって失敗するのを防ぐため）。 */
     var GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
     var OCR_PROMPT = [
       'あなたは日本の法令学習用の文字起こし（OCR）を行います。添付画像は、地方自治法・地方公務員法の参考書や条文のページです。画像内の文章を、できるだけ正確にそのまま文字起こししてください。',
@@ -2033,50 +2039,92 @@ renderItems();
       e.kind = kind;
       return e;
     }
+    function ocrSleep(ms){ return new Promise(function(r){ setTimeout(r, ms); }); }
     function ocrPayload(img){
       var supported = {'image/jpeg': 1, 'image/png': 1, 'image/webp': 1, 'image/gif': 1};
-      if (supported[img.mimeType]) return Promise.resolve({mimeType: img.mimeType, base64: img.dataBase64});
-      /* HEICなどGeminiが直接読めない形式は、ブラウザで表示できる場合に限りJPEGへ変換したコピーを送る（原本は変更しない） */
+      var MAX_DIM = 2560;
+      /* 送信専用のペイロードを作る。保存済みの原本データは変更しない。
+         ・対応形式で、長辺2560px以下かつデータ量が小さい画像は、劣化させずそのまま送る。
+         ・それ以外（大きな写真・HEICなど）は、ブラウザで表示できる場合に限り、
+           長辺2560pxを上限にJPEGへ変換したコピーを送る。 */
       return new Promise(function(res, rej){
         var im = new Image();
         im.onload = function(){
           try {
             var w = im.naturalWidth, h = im.naturalHeight;
-            var scale = Math.min(1, 3000 / Math.max(w, h));
+            if (!w || !h) throw new Error('no-size');
+            var scale = Math.min(1, MAX_DIM / Math.max(w, h));
+            if (supported[img.mimeType] && scale >= 1 && (img.dataBase64 || '').length < 5 * 1024 * 1024){
+              res({mimeType: img.mimeType, base64: img.dataBase64});
+              return;
+            }
             var cv = document.createElement('canvas');
             cv.width = Math.max(1, Math.round(w * scale));
             cv.height = Math.max(1, Math.round(h * scale));
             cv.getContext('2d').drawImage(im, 0, 0, cv.width, cv.height);
             var du = cv.toDataURL('image/jpeg', 0.92);
             res({mimeType: 'image/jpeg', base64: du.split(',')[1]});
-          } catch(e){ rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）をOCR用に変換できませんでした。')); }
+          } catch(e){
+            if (supported[img.mimeType]) res({mimeType: img.mimeType, base64: img.dataBase64});
+            else rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）をOCR用に変換できませんでした。'));
+          }
         };
-        im.onerror = function(){ rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）はOCRに対応していませんでした。JPEGやPNGの画像でお試しください。')); };
+        im.onerror = function(){
+          if (supported[img.mimeType]) res({mimeType: img.mimeType, base64: img.dataBase64});
+          else rej(ocrError('format', 'この画像形式（' + (img.mimeType || '不明') + '）はOCRに対応していませんでした。JPEGやPNGの画像でお試しください。'));
+        };
         im.src = 'data:' + (img.mimeType || 'image/jpeg') + ';base64,' + (img.dataBase64 || '');
       });
     }
-    function geminiOcr(img, apiKey){
+    function geminiOcr(img, apiKey, onStatus){
+      function note(msg){ if (typeof onStatus === 'function'){ try { onStatus(msg); } catch(e){} } }
       return ocrPayload(img).then(function(payload){
         var body = JSON.stringify({
           contents: [{parts: [{text: OCR_PROMPT}, {inline_data: {mime_type: payload.mimeType, data: payload.base64}}]}]
         });
-        function tryModel(i){
-          if (i >= GEMINI_MODELS.length){
+        var TRANSIENT = {500: 1, 502: 1, 503: 1, 504: 1};
+        var lastTransient = 0;
+        function attempt(modelIdx, tryIdx){
+          if (modelIdx >= GEMINI_MODELS.length){
+            if (lastTransient) throw ocrError('busy', 'Geminiが混み合っています（エラー' + lastTransient + '）。自動で再試行と別モデルへの切り替えを行いましたが、回復しませんでした。しばらく時間をおいてから、もう一度OCRを実行してください。保存済みの原本画像はそのまま残っています。');
             throw ocrError('model', '利用できるGeminiモデルがありませんでした（すべてのモデルで失敗しました）。時間をおいて再試行してください。');
           }
-          var model = GEMINI_MODELS[i];
+          var model = GEMINI_MODELS[modelIdx];
           var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent';
-          return fetch(url, {
+          var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+          var timer = controller ? setTimeout(function(){ try { controller.abort(); } catch(e){} }, 90000) : null;
+          var opts = {
             method: 'POST',
             headers: {'Content-Type': 'application/json', 'x-goog-api-key': apiKey},
             body: body
-          }).then(function(resp){
-            if (resp.status === 429) throw ocrError('quota', '無料枠の上限に達しました（エラー429）。時間を置くと回復します。このアプリが有料枠へ自動で切り替えることはありません。');
+          };
+          if (controller) opts.signal = controller.signal;
+          return fetch(url, opts).then(function(resp){
+            if (timer) clearTimeout(timer);
             if (resp.status === 401 || resp.status === 403) throw ocrError('auth', 'APIキーが無効か、このキーでは利用できません（エラー' + resp.status + '）。設定画面でキーを確認してください。');
-            if (resp.status === 404) return tryModel(i + 1);
+            if (resp.status === 404) return attempt(modelIdx + 1, 0);
+            if (resp.status === 429 || TRANSIENT[resp.status]){
+              var isQuota = (resp.status === 429);
+              if (!isQuota) lastTransient = resp.status;
+              var maxTries = isQuota ? 2 : 3;
+              if (tryIdx < maxTries){
+                var ra = parseInt((resp.headers && resp.headers.get('Retry-After')) || '', 10);
+                var delay;
+                if (!isNaN(ra) && ra > 0) delay = Math.min(ra * 1000, 30000);
+                else if (isQuota) delay = [6000, 14000][tryIdx] || 14000;
+                else delay = [2000, 5000, 10000][tryIdx] || 10000;
+                note(isQuota
+                  ? '無料枠の上限に近づいています。少し待って自動で再試行します…'
+                  : 'Geminiが混み合っています（エラー' + resp.status + '）。少し待って自動で再試行します…');
+                return ocrSleep(delay).then(function(){ return attempt(modelIdx, tryIdx + 1); });
+              }
+              if (isQuota) throw ocrError('quota', '無料枠の上限に達しました（エラー429）。自動で再試行しましたが回復しませんでした。時間を置くと回復します。このアプリが有料枠へ自動で切り替えることはありません。');
+              note('別のモデルに切り替えて再試行します…');
+              return attempt(modelIdx + 1, 0);
+            }
             if (!resp.ok){
               return resp.text().then(function(t){
-                if (resp.status === 400 && /model/i.test(t || '')) return tryModel(i + 1);
+                if (resp.status === 400 && /model/i.test(t || '')) return attempt(modelIdx + 1, 0);
                 throw ocrError('api', 'Gemini APIでエラーが発生しました（エラー' + resp.status + '）。時間をおいて再試行してください。');
               });
             }
@@ -2090,10 +2138,17 @@ renderItems();
               return {text: text, model: model};
             });
           }, function(){
+            if (timer) clearTimeout(timer);
+            /* 通信失敗・タイムアウトは一時的なことが多いので、同じモデルで再試行し、最後に次のモデルも試す */
+            if (tryIdx < 2){
+              note('通信が不安定なため、少し待って自動で再試行します…');
+              return ocrSleep(2500 * (tryIdx + 1)).then(function(){ return attempt(modelIdx, tryIdx + 1); });
+            }
+            if (modelIdx + 1 < GEMINI_MODELS.length) return attempt(modelIdx + 1, 0);
             throw ocrError('network', '通信に失敗しました。ネットワーク接続を確認して、再試行してください。');
           });
         }
-        return tryModel(0);
+        return attempt(0, 0);
       });
     }
     function rebuildItemBodyFromOcr(itemId){
@@ -2160,10 +2215,13 @@ renderItems();
           var msg = $('ocrMsg');
           runBtn.disabled = true;
           runBtn.textContent = 'AIが読み取り中です…';
-          msg.innerHTML = '<div class="notice">Gemini APIへ画像を送信して読み取っています。モデルが使えない場合は自動で次のモデルを試します。</div>';
+          msg.innerHTML = '<div class="notice">Gemini APIへ画像を送信して読み取っています。混雑時（エラー503など）は自動で再試行し、モデルが使えない場合は次のモデルを試します。</div>';
           img.ocrStatus = 'running';
           dbPut('images', img).catch(function(){});
-          geminiOcr(img, cur.key).then(function(result){
+          geminiOcr(img, cur.key, function(statusMsg){
+            var m = $('ocrMsg');
+            if (m) m.innerHTML = '<div class="notice">' + esc(statusMsg) + '</div>';
+          }).then(function(result){
             img.ocrStatus = 'done';
             img.ocrText = result.text;
             img.ocrModel = result.model;
